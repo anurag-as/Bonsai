@@ -1,0 +1,22 @@
+[package]
+name = "bonsai"
+version = "0.1.0"
+edition = "2021"
+description = "A zero-dependency, embeddable, self-tuning spatial index for Rust"
+license = "MIT"
+
+[features]
+default = []
+serde   = ["dep:serde"]
+wasm    = ["dep:wasm-bindgen"]
+ffi     = []
+full    = ["serde", "wasm", "ffi"]
+
+[dependencies]
+serde        = { version = "1", features = ["derive"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+proptest = { version = "1.4.0", default-features = false, features = ["std", "bit-set"] }
+loom      = "0.7"
+criterion = { version = "0.4", features = ["html_reports"] }
