@@ -23,24 +23,40 @@ pub trait CoordType:
 
 impl CoordType for f32 {
     #[inline]
-    fn zero() -> Self { 0.0_f32 }
+    fn zero() -> Self {
+        0.0_f32
+    }
     #[inline]
-    fn infinity() -> Self { f32::INFINITY }
+    fn infinity() -> Self {
+        f32::INFINITY
+    }
     #[inline]
-    fn abs(self) -> Self { f32::abs(self) }
+    fn abs(self) -> Self {
+        f32::abs(self)
+    }
     #[inline]
-    fn sqrt(self) -> Self { f32::sqrt(self) }
+    fn sqrt(self) -> Self {
+        f32::sqrt(self)
+    }
 }
 
 impl CoordType for f64 {
     #[inline]
-    fn zero() -> Self { 0.0_f64 }
+    fn zero() -> Self {
+        0.0_f64
+    }
     #[inline]
-    fn infinity() -> Self { f64::INFINITY }
+    fn infinity() -> Self {
+        f64::INFINITY
+    }
     #[inline]
-    fn abs(self) -> Self { f64::abs(self) }
+    fn abs(self) -> Self {
+        f64::abs(self)
+    }
     #[inline]
-    fn sqrt(self) -> Self { f64::sqrt(self) }
+    fn sqrt(self) -> Self {
+        f64::sqrt(self)
+    }
 }
 
 /// A point in D-dimensional space with coordinate type `C`.
@@ -183,7 +199,10 @@ impl std::fmt::Display for BonsaiError {
         match self {
             BonsaiError::NotFound(id) => write!(f, "entry {:?} not found", id),
             BonsaiError::Frozen => {
-                write!(f, "index is frozen — call unfreeze() to re-enable adaptation")
+                write!(
+                    f,
+                    "index is frozen — call unfreeze() to re-enable adaptation"
+                )
             }
             BonsaiError::MigrationInProgress => write!(f, "migration already in progress"),
             BonsaiError::Serialisation(msg) => write!(f, "serialisation error: {}", msg),
@@ -328,7 +347,10 @@ mod tests {
     fn bonsai_error_display() {
         let e = BonsaiError::NotFound(EntryId(42));
         assert!(e.to_string().contains("42"));
-        let e2 = BonsaiError::DimensionMismatch { expected: 3, got: 2 };
+        let e2 = BonsaiError::DimensionMismatch {
+            expected: 3,
+            got: 2,
+        };
         assert!(e2.to_string().contains('3'));
     }
 }

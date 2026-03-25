@@ -1,3 +1,4 @@
+pub mod hilbert;
 pub mod types;
 
 pub use types::{
