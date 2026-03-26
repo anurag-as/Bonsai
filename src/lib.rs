@@ -1,3 +1,4 @@
+pub mod bloom;
 pub mod hilbert;
 pub mod types;
 

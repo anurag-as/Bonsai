@@ -44,6 +44,18 @@ fn main() {
     let i_near = c16.index(&near);
     let i_far = c16.index(&far);
     println!("  base ({:2},{:2}) → {:4}", base[0], base[1], i_base);
-    println!("  near ({:2},{:2}) → {:4}  diff={}", near[0], near[1], i_near, i_base.abs_diff(i_near));
-    println!("  far  ({:2},{:2}) → {:4}  diff={}", far[0], far[1], i_far, i_base.abs_diff(i_far));
+    println!(
+        "  near ({:2},{:2}) → {:4}  diff={}",
+        near[0],
+        near[1],
+        i_near,
+        i_base.abs_diff(i_near)
+    );
+    println!(
+        "  far  ({:2},{:2}) → {:4}  diff={}",
+        far[0],
+        far[1],
+        i_far,
+        i_base.abs_diff(i_far)
+    );
 }

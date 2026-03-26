@@ -56,7 +56,11 @@ impl<const D: usize> HilbertCurve<D> {
     #[inline]
     pub fn default_order() -> u32 {
         let max_order = 128u32 / D as u32;
-        if max_order >= 32 { 32 } else { max_order.min(16) }
+        if max_order >= 32 {
+            32
+        } else {
+            max_order.min(16)
+        }
     }
 
     /// Compute the Hilbert index for the given D-dimensional integer coordinate.
@@ -67,7 +71,11 @@ impl<const D: usize> HilbertCurve<D> {
     /// Returns a `u128` Hilbert index in `[0, 2^(D*order) - 1]`.
     pub fn index(&self, coords: &[u64; D]) -> u128 {
         let order = self.order as usize;
-        let mask = if order >= 64 { u64::MAX } else { (1u64 << order) - 1 };
+        let mask = if order >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << order) - 1
+        };
 
         let mut x = [0u64; D];
         for d in 0..D {
@@ -211,7 +219,10 @@ mod tests {
     fn default_order_within_budget() {
         fn check<const D: usize>() {
             let order = HilbertCurve::<D>::default_order();
-            assert!(D as u32 * order <= 128, "D={D} order={order} exceeds 128-bit budget");
+            assert!(
+                D as u32 * order <= 128,
+                "D={D} order={order} exceeds 128-bit budget"
+            );
         }
         check::<1>();
         check::<2>();
@@ -223,11 +234,7 @@ mod tests {
         check::<8>();
     }
 
-    // Feature: bonsai-spatial-index, Property 23: Hilbert spatial locality
-    // For any two points that are spatially close in D-dimensional space,
-    // their Hilbert indices must be numerically closer on average than the
-    // Hilbert indices of two randomly chosen points from the same dataset.
-    // Validates: Requirements 11.5
+    // Spatially close points have closer Hilbert indices than random pairs on average
     proptest! {
         #![proptest_config(proptest::test_runner::Config {
             cases: 200,
