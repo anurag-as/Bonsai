@@ -122,7 +122,7 @@ impl<C: CoordType, const D: usize> BBox<C, D> {
 }
 
 /// Unique identifier for an index entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntryId(pub u64);
 
 /// Discriminant for the four spatial index backends.
