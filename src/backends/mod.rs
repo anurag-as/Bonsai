@@ -6,8 +6,10 @@
 
 use crate::types::{BBox, BackendKind, CoordType, EntryId, Point};
 
+pub mod kdtree;
 pub mod rtree;
 
+pub use kdtree::KDTree;
 pub use rtree::RTree;
 
 /// Uniform interface implemented by all spatial index backends.
