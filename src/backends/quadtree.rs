@@ -78,7 +78,11 @@ impl<C: CoordType, const D: usize> QuadNode<C, D> {
                 loose_max[d] = C::from((hi + half) as f32);
             }
             let loose_bounds = BBox::new(Point::new(loose_min), Point::new(loose_max));
-            children.push(QuadNode::new_leaf(child_bounds, loose_bounds, self.depth + 1));
+            children.push(QuadNode::new_leaf(
+                child_bounds,
+                loose_bounds,
+                self.depth + 1,
+            ));
         }
         children
     }
@@ -514,7 +518,11 @@ mod tests {
     fn each_point_assigned_to_exactly_one_child_d2() {
         let pts = rand_pts::<2>(300, 42);
         let tree = Quadtree::<usize, f64, 2>::bulk_load(
-            pts.iter().cloned().enumerate().map(|(i, p)| (p, i)).collect(),
+            pts.iter()
+                .cloned()
+                .enumerate()
+                .map(|(i, p)| (p, i))
+                .collect(),
         );
         if let Some(ref children) = tree.root.children {
             let mut all_ids: Vec<EntryId> = Vec::new();
@@ -594,7 +602,12 @@ mod tests {
     }
 
     fn bbox2d() -> impl Strategy<Value = BBox<f64, 2>> {
-        (0.0_f64..900.0, 0.0_f64..900.0, 10.0_f64..200.0, 10.0_f64..200.0)
+        (
+            0.0_f64..900.0,
+            0.0_f64..900.0,
+            10.0_f64..200.0,
+            10.0_f64..200.0,
+        )
             .prop_map(|(x, y, w, h)| BBox::new(Point::new([x, y]), Point::new([x + w, y + h])))
     }
 

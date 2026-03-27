@@ -6,10 +6,12 @@
 //!   - RTree         — R*-tree range and kNN queries
 //!   - KDTree        — KD-tree range and kNN queries, depth bound
 //!   - Quadtree      — 2D quadtree and 3D octree
+//!   - GridIndex     — uniform spatial hash grid (10k points demo)
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
 
+use bonsai::backends::grid::GridIndex;
 use bonsai::backends::kdtree::KDTree;
 use bonsai::backends::quadtree::Quadtree;
 use bonsai::backends::rtree::RTree;
@@ -55,7 +57,12 @@ fn main() {
     let mut rng = Lcg::new(42);
 
     let centres: Vec<[f64; 2]> = (0..CLUSTERS)
-        .map(|_| [rng.next_f64() * 800.0 + 100.0, rng.next_f64() * 800.0 + 100.0])
+        .map(|_| {
+            [
+                rng.next_f64() * 800.0 + 100.0,
+                rng.next_f64() * 800.0 + 100.0,
+            ]
+        })
         .collect();
 
     let raw: Vec<Point<f64, 2>> = (0..N)
@@ -79,7 +86,12 @@ fn main() {
 
     println!("First 5 points in Hilbert order:");
     for (h, p) in indexed.iter().take(5) {
-        println!("  hilbert={:<12}  ({:.2}, {:.2})", h, p.coords()[0], p.coords()[1]);
+        println!(
+            "  hilbert={:<12}  ({:.2}, {:.2})",
+            h,
+            p.coords()[0],
+            p.coords()[1]
+        );
     }
 
     // ── R-tree and KD-tree ────────────────────────────────────────────────────
@@ -101,7 +113,11 @@ fn main() {
         kdtree.len(),
         kdtree.depth(),
         depth_bound,
-        if kdtree.depth() <= depth_bound { "ok" } else { "EXCEEDED" }
+        if kdtree.depth() <= depth_bound {
+            "ok"
+        } else {
+            "EXCEEDED"
+        }
     );
     println!("Bloom   memory  : {} bytes, k={}", bloom.memory, bloom.k);
 
@@ -129,12 +145,19 @@ fn main() {
     println!("Brute   : {brute_count}");
     println!(
         "Match   : {}",
-        if rt_count == brute_count && kd_count == brute_count { "yes" } else { "NO" }
+        if rt_count == brute_count && kd_count == brute_count {
+            "yes"
+        } else {
+            "NO"
+        }
     );
 
     // ── Bloom catches an empty-region query ───────────────────────────────────
     println!("\n=== Empty-region query [9000,9100]^2 ===");
-    let empty_bbox = BBox::new(Point::new([9_000.0, 9_000.0]), Point::new([9_100.0, 9_100.0]));
+    let empty_bbox = BBox::new(
+        Point::new([9_000.0, 9_000.0]),
+        Point::new([9_100.0, 9_100.0]),
+    );
     match bloom.check(&empty_bbox) {
         BloomResult::DefinitelyAbsent => {
             println!("Bloom: DefinitelyAbsent — trees skipped (O(1) rejection)");
@@ -167,10 +190,16 @@ fn main() {
     let mut qt2 = Quadtree::<usize, f64, 2>::new();
     let mut rng2 = Lcg::new(77);
     for i in 0..200usize {
-        qt2.insert(Point::new([rng2.next_f64() * 1000.0, rng2.next_f64() * 1000.0]), i);
+        qt2.insert(
+            Point::new([rng2.next_f64() * 1000.0, rng2.next_f64() * 1000.0]),
+            i,
+        );
     }
     let qt2_range = qt2
-        .range_query(&BBox::new(Point::new([200.0, 200.0]), Point::new([800.0, 800.0])))
+        .range_query(&BBox::new(
+            Point::new([200.0, 200.0]),
+            Point::new([800.0, 800.0]),
+        ))
         .len();
     println!("  entries    : {}", qt2.len());
     println!("  node count : {}", qt2.node_count());
@@ -218,6 +247,50 @@ fn main() {
     println!(
         "  All match: {}",
         if rt_count == brute_count && kd_count == brute_count && qt_count == brute_count {
+            "yes"
+        } else {
+            "NO"
+        }
+    );
+
+    // ── GridIndex demo: 10k uniform 2D points ─────────────────────────────────
+    println!("\n=== GridIndex demo (10 000 uniform 2D points) ===");
+    const GRID_N: usize = 10_000;
+    let mut rng_grid = Lcg::new(1234);
+    let grid_pts: Vec<(Point<f64, 2>, usize)> = (0..GRID_N)
+        .map(|i| {
+            (
+                Point::new([rng_grid.next_f64() * 1000.0, rng_grid.next_f64() * 1000.0]),
+                i,
+            )
+        })
+        .collect();
+
+    // bulk_load chooses a cell size targeting ~1 point/cell.
+    let grid = GridIndex::<usize, f64, 2>::bulk_load(grid_pts.clone());
+
+    let cell_count = grid.cell_count();
+    let avg_per_cell = GRID_N as f64 / cell_count as f64;
+    println!("  Inserted       : {GRID_N} points");
+    println!("  Cell count     : {cell_count}");
+    println!("  Avg pts/cell   : {avg_per_cell:.2}");
+
+    // Range query covering 10% of the space: [0, 316] × [0, 316]
+    // (316 ≈ 1000 × sqrt(0.1) so the area is ~10% of [0,1000]^2)
+    let grid_bbox = BBox::new(Point::new([0.0, 0.0]), Point::new([316.0, 316.0]));
+    let grid_results = grid.range_query(&grid_bbox);
+    let brute_grid = grid_pts
+        .iter()
+        .filter(|(p, _)| grid_bbox.contains_point(p))
+        .count();
+    println!(
+        "  Range query [0,316]^2 (≈10% area): {} results (brute-force: {})",
+        grid_results.len(),
+        brute_grid
+    );
+    println!(
+        "  Correct: {}",
+        if grid_results.len() == brute_grid {
             "yes"
         } else {
             "NO"

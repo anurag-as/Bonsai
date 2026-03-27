@@ -6,10 +6,12 @@
 
 use crate::types::{BBox, BackendKind, CoordType, EntryId, Point};
 
+pub mod grid;
 pub mod kdtree;
 pub mod quadtree;
 pub mod rtree;
 
+pub use grid::GridIndex;
 pub use kdtree::KDTree;
 pub use quadtree::Quadtree;
 pub use rtree::RTree;
