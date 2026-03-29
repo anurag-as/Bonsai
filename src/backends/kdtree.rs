@@ -605,6 +605,51 @@ mod tests {
         }
     }
 
+    // Insert-Remove Round Trip
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 100,
+            ..Default::default()
+        })]
+
+        #[test]
+        fn prop_insert_remove_round_trip_kdtree(
+            pts in prop::collection::vec(pt2d(), 1..50),
+            remove_indices in prop::collection::vec(0usize..50, 0..25),
+        ) {
+            let mut tree = KDTree::<usize, f64, 2>::new();
+            let mut inserted: Vec<(Point<f64, 2>, EntryId)> = Vec::new();
+            for (i, &p) in pts.iter().enumerate() {
+                let id = tree.insert(p, i);
+                inserted.push((p, id));
+            }
+            let mut removed_ids: Vec<EntryId> = Vec::new();
+            for &ri in &remove_indices {
+                let idx = ri % inserted.len();
+                let (_, id) = inserted[idx];
+                if !removed_ids.contains(&id) {
+                    let result = tree.remove(id);
+                    prop_assert!(result.is_some(), "remove returned None for inserted id");
+                    removed_ids.push(id);
+                }
+            }
+            let full_bbox = BBox::new(Point::new([-1.0e9, -1.0e9]), Point::new([1.0e9, 1.0e9]));
+            let remaining_ids: Vec<EntryId> = tree.range_query(&full_bbox)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            for &removed_id in &removed_ids {
+                prop_assert!(
+                    !remaining_ids.contains(&removed_id),
+                    "removed entry {:?} still appears in range query",
+                    removed_id
+                );
+            }
+            let expected_len = inserted.len() - removed_ids.len();
+            prop_assert_eq!(tree.len(), expected_len);
+        }
+    }
+
     // Range query result must equal brute-force linear scan for any dataset and bbox.
     proptest! {
         #![proptest_config(proptest::test_runner::Config {

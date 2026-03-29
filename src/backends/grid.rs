@@ -493,7 +493,55 @@ mod tests {
             .prop_map(|(x, y, w, h)| BBox::new(Point::new([x, y]), Point::new([x + w, y + h])))
     }
 
-    // Feature: bonsai-spatial-index, Property 1: range_query result equals
+    // Insert-Remove Round Trip
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 100,
+            ..Default::default()
+        })]
+
+        #[test]
+        fn prop_insert_remove_round_trip_grid(
+            pts in prop::collection::vec(pt2d(), 1..50),
+            remove_indices in prop::collection::vec(0usize..50, 0..25),
+        ) {
+            let mut grid = GridIndex::<usize, f64, 2>::new(
+                [10.0_f64, 10.0],
+                Point::new([0.0_f64, 0.0]),
+            );
+            let mut inserted: Vec<(Point<f64, 2>, EntryId)> = Vec::new();
+            for (i, &p) in pts.iter().enumerate() {
+                let id = grid.insert(p, i);
+                inserted.push((p, id));
+            }
+            let mut removed_ids: Vec<EntryId> = Vec::new();
+            for &ri in &remove_indices {
+                let idx = ri % inserted.len();
+                let (_, id) = inserted[idx];
+                if !removed_ids.contains(&id) {
+                    let result = grid.remove(id);
+                    prop_assert!(result.is_some(), "remove returned None for inserted id");
+                    removed_ids.push(id);
+                }
+            }
+            // Use a bbox that covers the point space (0..1000) without being huge
+            let full_bbox = BBox::new(Point::new([0.0, 0.0]), Point::new([1000.0, 1000.0]));
+            let remaining_ids: Vec<EntryId> = grid.range_query(&full_bbox)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            for &removed_id in &removed_ids {
+                prop_assert!(
+                    !remaining_ids.contains(&removed_id),
+                    "removed entry {:?} still appears in range query",
+                    removed_id
+                );
+            }
+            let expected_len = inserted.len() - removed_ids.len();
+            prop_assert_eq!(grid.len(), expected_len);
+        }
+    }
+
     // brute-force linear scan for any random dataset and bbox.
     proptest! {
         #![proptest_config(proptest::test_runner::Config {
