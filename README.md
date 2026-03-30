@@ -12,7 +12,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bonsai = { path = "." }
+bonsai-index = "0.1"
 ```
 
 ### Feature Flags
@@ -26,10 +26,10 @@ bonsai = { path = "." }
 
 ```toml
 # Enable serialisation only
-bonsai = { path = ".", features = ["serde"] }
+bonsai-index = { version = "0.1", features = ["serde"] }
 
 # Enable everything
-bonsai = { path = ".", features = ["full"] }
+bonsai-index = { version = "0.1", features = ["full"] }
 ```
 
 ---
