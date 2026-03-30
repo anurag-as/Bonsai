@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c5b0790fcdb353ffa7602ce054e850e011b9e1e802f430911dd64635b48d6fd2 # shrinks to pts = [Point([324.96968530450664, 670.5587339922067]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0]), Point([0.0, 0.0])], bbox = BBox { min: Point([285.04815874055026, 555.2986468352617]), max: Point([335.04815874055026, 847.0201949728455]) }

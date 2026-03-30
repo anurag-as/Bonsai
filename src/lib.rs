@@ -1,6 +1,7 @@
 pub mod backends;
 pub mod bloom;
 pub mod hilbert;
+pub mod migration;
 pub mod profiler;
 pub mod types;
 

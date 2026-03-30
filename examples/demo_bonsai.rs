@@ -11,6 +11,9 @@
 //!   7. Profiler      — feed the §1 dataset into the profiler; measure DataShape
 //!   8. CostModel     — rank backends using the §7 DataShape
 //!   9. PolicyEngine  — tick on the §7 shape; show migration decision
+//!  10. Migration     — execute the §9 decision: migrate the §1 KD-tree to the
+//!                      policy-chosen backend; verify range query results are
+//!                      identical before and after
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
@@ -18,6 +21,7 @@
 use bonsai::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use bonsai::bloom::{BloomCache, BloomResult};
 use bonsai::hilbert::HilbertCurve;
+use bonsai::migration::SimpleIndex;
 use bonsai::profiler::{CostModel, Observation, PolicyEngine, Profiler, QueryKind};
 use bonsai::types::{BBox, BackendKind, EntryId, Point};
 struct Lcg(u64);
@@ -403,4 +407,63 @@ fn main() {
         }
     }
     println!("  Final backend: {:?}", engine.current_backend());
+
+    // ── 10. Migration — execute the §9 policy decision on the §1 dataset ──────
+    //
+    // §9 determined that `starting_backend` should migrate to `cheapest`.
+    // Here we build a SimpleIndex backed by `starting_backend`, load the same
+    // 2 000-point Hilbert-sorted dataset from §1, run the §4 range query to
+    // capture the before-migration result, then execute the migration and
+    // verify the result is identical.
+    println!(
+        "\n=== 10. Migration ({N} points, {:?} → {:?}) ===",
+        starting_backend, cheapest,
+    );
+    println!("  (same dataset as §1; migration target chosen by §9 PolicyEngine)");
+
+    // Build the index on the backend the policy engine started on.
+    let mut mig_index: SimpleIndex<usize, f64, 2> = match starting_backend {
+        BackendKind::RTree => {
+            SimpleIndex::new(Box::new(RTree::<(EntryId, usize), f64, 2>::new()))
+        }
+        _ => SimpleIndex::new(Box::new(KDTree::<(EntryId, usize), f64, 2>::new())),
+    };
+
+    // Load the §1 Hilbert-sorted dataset.
+    for (i, (_, p)) in sorted.iter().enumerate() {
+        mig_index.insert(*p, i);
+    }
+
+    // Range query before migration — reuse the §4 bbox.
+    let mut before_ids = mig_index.range_query(&query_bbox);
+    before_ids.sort_by_key(|id| id.0);
+    println!("  Before migration : {} results (bbox = §4 query)", before_ids.len());
+
+    // Execute the migration to the policy-chosen backend.
+    let mig_result = match cheapest {
+        BackendKind::RTree => mig_index
+            .migrate(RTree::<(EntryId, usize), f64, 2>::bulk_load)
+            .expect("migration should succeed"),
+        BackendKind::KDTree => mig_index
+            .migrate(KDTree::<(EntryId, usize), f64, 2>::bulk_load)
+            .expect("migration should succeed"),
+        BackendKind::Quadtree => mig_index
+            .migrate(Quadtree::<(EntryId, usize), f64, 2>::bulk_load)
+            .expect("migration should succeed"),
+        BackendKind::Grid => mig_index
+            .migrate(GridIndex::<(EntryId, usize), f64, 2>::bulk_load)
+            .expect("migration should succeed"),
+    };
+
+    // Range query after migration — must match.
+    let mut after_ids = mig_index.range_query(&query_bbox);
+    after_ids.sort_by_key(|id| id.0);
+    println!("  After migration  : {} results", after_ids.len());
+    println!(
+        "  Results identical: {}",
+        if before_ids == after_ids { "yes" } else { "NO" },
+    );
+    println!("  New backend      : {:?}", mig_result.new_backend);
+    println!("  Entry count after: {} (expected {N})", mig_result.entry_count);
+    println!("  Migration duration: {:?}", mig_result.duration);
 }
