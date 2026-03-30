@@ -29,3 +29,31 @@ proptest = { version = "1.4.0", default-features = false, features = ["std", "bi
 loom      = "0.7"
 criterion = { version = "0.4", features = ["html_reports"] }
 rayon     = "1.10"
+
+[[bench]]
+name = "insert_throughput"
+harness = false
+
+[[bench]]
+name = "range_query_latency"
+harness = false
+
+[[bench]]
+name = "knn_latency"
+harness = false
+
+[[bench]]
+name = "migration_cost"
+harness = false
+
+[[bench]]
+name = "bloom_cache_impact"
+harness = false
+
+[[bench]]
+name = "hilbert_vs_natural"
+harness = false
+
+[[bench]]
+name = "adaptation_convergence"
+harness = false

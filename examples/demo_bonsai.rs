@@ -26,6 +26,8 @@
 //!                      remaining 1 900 via `stream` (stdin pipe), then run
 //!                      stats, the §4 range query, kNN, and visualise on the
 //!                      full 2 000-point dataset
+//!  16. Latency table — build fresh 100k-point uniform 2D backends; time 1 000
+//!                      §4 range queries each; print p50/p95/p99 per backend
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
@@ -888,5 +890,85 @@ fn main() {
 
         std::fs::remove_file(&csv_path).ok();
         std::fs::remove_dir_all(&work_dir).ok();
+    }
+
+    // ── 16. Range-query latency table — p50/p95/p99 per backend ──────────────
+    // Times 1 000 range queries on a fresh uniform 2D dataset of 100k points
+    // for each backend and prints a p50/p95/p99 latency table. Uses a larger
+    // dataset than §1 so the per-query cost is representative of production
+    // scale; the same §4 bbox [300,700]^2 is reused for comparability.
+    println!("\n=== 16. Range-query latency (uniform 2D, 100k points, 1000 queries) ===");
+
+    print_range_query_latency_table();
+}
+
+fn print_range_query_latency_table() {
+    const N: usize = 100_000;
+    const QUERIES: usize = 1_000;
+
+    let mut rng = Lcg::new(99);
+    let pts: Vec<Point<f64, 2>> = (0..N)
+        .map(|_| Point::new([rng.next_f64() * 1000.0, rng.next_f64() * 1000.0]))
+        .collect();
+
+    let query_bbox = BBox::new(Point::new([300.0, 300.0]), Point::new([700.0, 700.0]));
+
+    let mut rt: RTree<usize, f64, 2> = RTree::new();
+    let mut kd: KDTree<usize, f64, 2> = KDTree::new();
+    let mut qt: Quadtree<usize, f64, 2> = Quadtree::new();
+    let mut gr: GridIndex<usize, f64, 2> = GridIndex::new([10.0, 10.0], Point::new([0.0, 0.0]));
+
+    for (i, &p) in pts.iter().enumerate() {
+        rt.insert(p, i);
+        kd.insert(p, i);
+        qt.insert(p, i);
+        gr.insert(p, i);
+    }
+
+    fn measure<B: SpatialBackend<usize, f64, 2>>(
+        idx: &B,
+        bbox: &BBox<f64, 2>,
+        queries: usize,
+    ) -> Vec<u64> {
+        let mut latencies: Vec<u64> = (0..queries)
+            .map(|_| {
+                let t0 = std::time::Instant::now();
+                let _ = idx.range_query(bbox);
+                t0.elapsed().as_nanos() as u64
+            })
+            .collect();
+        latencies.sort_unstable();
+        latencies
+    }
+
+    fn percentile(sorted: &[u64], pct: f64) -> u64 {
+        let idx = ((sorted.len() as f64 * pct / 100.0) as usize).min(sorted.len() - 1);
+        sorted[idx]
+    }
+
+    let rt_lat = measure(&rt, &query_bbox, QUERIES);
+    let kd_lat = measure(&kd, &query_bbox, QUERIES);
+    let qt_lat = measure(&qt, &query_bbox, QUERIES);
+    let gr_lat = measure(&gr, &query_bbox, QUERIES);
+
+    println!(
+        "  {:<10}  {:>10}  {:>10}  {:>10}",
+        "backend", "p50 (ns)", "p95 (ns)", "p99 (ns)"
+    );
+    println!("  {}", "-".repeat(46));
+
+    for (name, lat) in [
+        ("RTree", &rt_lat),
+        ("KDTree", &kd_lat),
+        ("Quadtree", &qt_lat),
+        ("Grid", &gr_lat),
+    ] {
+        println!(
+            "  {:<10}  {:>10}  {:>10}  {:>10}",
+            name,
+            percentile(lat, 50.0),
+            percentile(lat, 95.0),
+            percentile(lat, 99.0),
+        );
     }
 }
