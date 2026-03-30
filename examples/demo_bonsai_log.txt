@@ -1,0 +1,814 @@
+=== 1. Hilbert sort (2000 clustered points, D=2, order=10) ===
+  First 5 points in Hilbert order:
+    hilbert=32850         (121.85, 239.52)
+    hilbert=32882         (119.77, 241.97)
+    hilbert=32886         (119.31, 239.02)
+    hilbert=32907         (109.69, 244.69)
+    hilbert=32926         (115.34, 243.39)
+
+=== 2. BloomCache (65 536 bytes, k=7) ===
+  Populated from 2000 point bboxes — memory 65536 bytes, k=7
+
+=== 3. Load all four backends in Hilbert order ===
+  RTree    : 2000 entries
+  KDTree   : 2000 entries  depth=9  bound=12  ok
+  Quadtree : 2000 entries  nodes=789  max_depth=7  children_per_split=4
+  Grid     : 2000 entries  cells=829  avg_per_cell=2.41
+
+=== 4. Range query [300,700]^2 ===
+  Bloom: ProbablyPresent — querying all backends
+  RTree=646  KDTree=646  Quadtree=646  Grid=646  Brute=646
+  All match brute: yes
+  Empty [9000,9100]^2 — Bloom: DefinitelyAbsent (O(1) rejection)
+
+=== 5. kNN(k=5) from (500, 500) ===
+  rank  RTree       KDTree      Quadtree    Grid        all_match
+  #0       46.5356     46.5356     46.5356     46.5356  yes
+  #1       48.3308     48.3308     48.3308     48.3308  yes
+  #2       50.7207     50.7207     50.7207     50.7207  yes
+  #3       56.2563     56.2563     56.2563     56.2563  yes
+  #4       59.1405     59.1405     59.1405     59.1405  yes
+
+=== 6. Insert-remove round-trip (first 100 §1 points, remove 50) ===
+  RTree       before=100  removed=50  after=50  violations=0  ok
+  KDTree      before=100  removed=50  after=50  violations=0  ok
+  Quadtree    before=100  removed=50  after=50  violations=0  ok
+  Grid        before=100  removed=50  after=50  violations=0  ok
+  All backends passed: yes
+
+=== 7. Profiler (2000 §1 points, reservoir=512) ===
+  point_count    = 512
+  clustering_coef= 3.7371  (clustered data → expected > 1.0)
+  effective_dim  = 0.8900  (2D data → expected ≈ 2.0)
+  skewness       = [-0.3528, 0.2286]
+  query_mix      = range=1.00 knn=0.00 join=0.00 sel=0.3230
+
+=== 8. CostModel (§7 DataShape, D=2) ===
+  R-tree     cost =     2.0150 ← cheapest
+  KD-tree    cost =    27.3131
+  Grid       cost =   179.5992
+  Quadtree   cost =     2.0150
+  clustering_coef=3.7371 → RTree wins
+
+=== 9. PolicyEngine (§7 DataShape, hysteresis=5) ===
+  Starting on KDTree (cost model prefers RTree) — migration expected after window
+  tick 1 | obs=1 | no migration (hysteresis guard)
+  tick 2 | obs=2 | no migration (hysteresis guard)
+  tick 3 | obs=3 | no migration (hysteresis guard)
+  tick 4 | obs=4 | no migration (hysteresis guard)
+  tick 5 | obs=5 | no migration (hysteresis guard)
+  tick 6 | obs=6 | *** MIGRATE → RTree (cost_ratio=0.074) ***
+  [migration complete — hysteresis counter reset]
+  tick 7 | obs=1 | no migration (hysteresis guard)
+  tick 8 | obs=2 | no migration (hysteresis guard)
+  Final backend: RTree
+
+=== 10. Migration (2000 §3 points, KDTree → RTree) ===
+  Before migration : 646 results (§4 bbox)
+  After migration  : 646 results
+  Results identical: yes
+  New backend      : RTree
+  Entry count      : 2000 (expected 2000)
+  Duration         : 23.268458ms
+
+=== 11. IndexRouter + StatsCollector (RTree from §10, 4+2 threads) ===
+  Points after concurrent inserts: 4000 (started 2000, added 2000)
+  StatsCollector inserts : 2000
+  StatsCollector queries : 400
+  Mean query latency     : 231438 ns
+  No panics or data races: yes (all 6 threads joined cleanly)
+
+=== 12. BonsaiIndex (2000 §1 points, §4 range query, §5 kNN) ===
+  Range query §4 bbox: 646 hits  brute=646  match=yes
+  kNN(k=5) from §5 query point — top-3 distances:
+    dist=46.5356
+    dist=48.3308
+    dist=50.7207
+  stats: backend=KDTree  point_count=2000  queries=2
+
+=== 13. Serialisation (feature = "serde", §12 index, 2000 points) ===
+  Serialised 2000 points → 64072 bytes
+  §4 range query: original=646 restored=646  brute=646  match=yes
+  First 5 payloads: [355, 356, 357, 358, 359]
+
+=== 14. C FFI round-trip (feature = "ffi", 3 §1 points, §4 bbox) ===
+  Inserted §1 points: (121.85,239.52) (119.77,241.97) (119.31,239.02)
+  Assigned IDs: [0, 1, 2]
+  Range §4 bbox: 0 result(s) (expected 0) — IDs: []
+  kNN(k=1) from §5 query point (500,500): count=1  id=0  dist=459.1791
+  Stats: point_count=3  queries=2  backend_kind=1
+  bonsai_free(null) — no-op: ok
+  FFI round-trip: all assertions passed
+
+=== 15. CLI demo (feature = "serde", 2 000 §1 points) ===
+  $ bonsai load /var/folders/dk/xwmm9bgn3kn9dcwgnkftw4040000gn/T/bonsai_demo_batch.csv
+    loaded 100 entries from '/var/folders/dk/xwmm9bgn3kn9dcwgnkftw4040000gn/T/bonsai_demo_batch.csv' (index now has 100 total)
+  $ bonsai stream --interval 500  (piping 1 900 points via stdin)
+    points=     600  backend=KDTree      migrations=0
+    points=    1100  backend=KDTree      migrations=0
+    points=    1600  backend=KDTree      migrations=0
+    stream complete — inserted 1900 points (index now has 2000 total)
+  $ bonsai stats
+    backend:         KDTree
+    point_count:     2000
+    migrations:      0
+    query_count:     0
+    migrating:       false
+    dimensions:      2
+    data_shape:
+      points:        0
+      bbox:          [0.000,0.000] – [1.000,1.000]
+      skewness:      [0.0000, 0.0000]
+      clustering:    1.0000
+      overlap_ratio: 0.0000
+      effective_dim: 2.0000
+      query_mix:     range=1.00 knn=0.00 join=0.00 sel=0.0100
+  $ bonsai query range 300 300 700 700
+    646 result(s) in [300,300,700,700]:
+      id=390 label=pt367
+      id=391 label=pt360
+      id=392 label=pt368
+      id=393 label=pt386
+      id=394 label=pt366
+      id=395 label=pt361
+      id=396 label=pt359
+      id=397 label=pt371
+      id=398 label=pt356
+      id=399 label=pt380
+      id=400 label=pt370
+      id=401 label=pt363
+      id=402 label=pt362
+      id=403 label=pt365
+      id=404 label=pt357
+      id=405 label=pt364
+      id=406 label=pt1946
+      id=407 label=pt1948
+      id=408 label=pt1950
+      id=409 label=pt1949
+      id=410 label=pt1947
+      id=411 label=pt1951
+      id=412 label=pt369
+      id=413 label=pt1956
+      id=414 label=pt1954
+      id=415 label=pt1953
+      id=416 label=pt1955
+      id=417 label=pt1966
+      id=418 label=pt1965
+      id=419 label=pt1964
+      id=420 label=pt1963
+      id=421 label=pt358
+      id=422 label=pt355
+      id=423 label=pt1971
+      id=424 label=pt1579
+      id=425 label=pt1969
+      id=426 label=pt1581
+      id=427 label=pt1967
+      id=428 label=pt1970
+      id=429 label=pt1580
+      id=430 label=pt1968
+      id=431 label=pt1974
+      id=432 label=pt1975
+      id=433 label=pt1972
+      id=434 label=pt1973
+      id=435 label=pt1573
+      id=436 label=pt1962
+      id=443 label=pt390
+      id=444 label=pt568
+      id=445 label=pt680
+      id=446 label=pt679
+      id=447 label=pt372
+      id=448 label=pt385
+      id=449 label=pt389
+      id=450 label=pt378
+      id=451 label=pt388
+      id=452 label=pt383
+      id=453 label=pt381
+      id=454 label=pt382
+      id=455 label=pt379
+      id=456 label=pt1582
+      id=457 label=pt384
+      id=458 label=pt377
+      id=459 label=pt376
+      id=460 label=pt1554
+      id=461 label=pt1552
+      id=462 label=pt374
+      id=463 label=pt373
+      id=464 label=pt375
+      id=465 label=pt387
+      id=466 label=pt1603
+      id=467 label=pt1602
+      id=468 label=pt1584
+      id=469 label=pt1585
+      id=470 label=pt1583
+      id=471 label=pt1557
+      id=472 label=pt1575
+      id=473 label=pt1578
+      id=474 label=pt1576
+      id=475 label=pt1574
+      id=476 label=pt1559
+      id=477 label=pt1577
+      id=478 label=pt1590
+      id=479 label=pt1598
+      id=480 label=pt1560
+      id=481 label=pt1561
+      id=482 label=pt1597
+      id=483 label=pt1591
+      id=484 label=pt1558
+      id=485 label=pt1553
+      id=486 label=pt1565
+      id=487 label=pt1555
+      id=488 label=pt1566
+      id=489 label=pt1567
+      id=490 label=pt1556
+      id=491 label=pt1564
+      id=492 label=pt1601
+      id=493 label=pt1615
+      id=494 label=pt1613
+      id=495 label=pt1600
+      id=496 label=pt1609
+      id=497 label=pt1610
+      id=498 label=pt1604
+      id=499 label=pt1441
+      id=500 label=pt1978
+      id=501 label=pt1977
+      id=502 label=pt1976
+      id=503 label=pt1952
+      id=504 label=pt1945
+      id=505 label=pt1944
+      id=506 label=pt1979
+      id=507 label=pt1980
+      id=508 label=pt1985
+      id=509 label=pt1986
+      id=510 label=pt1989
+      id=511 label=pt1984
+      id=512 label=pt1983
+      id=513 label=pt1988
+      id=514 label=pt1987
+      id=515 label=pt1960
+      id=516 label=pt1961
+      id=517 label=pt1958
+      id=518 label=pt1994
+      id=519 label=pt1995
+      id=520 label=pt1991
+      id=521 label=pt1990
+      id=522 label=pt1992
+      id=523 label=pt1996
+      id=524 label=pt1981
+      id=525 label=pt1982
+      id=526 label=pt1941
+      id=527 label=pt1943
+      id=528 label=pt1942
+      id=529 label=pt1997
+      id=530 label=pt1998
+      id=531 label=pt1599
+      id=532 label=pt1959
+      id=533 label=pt1592
+      id=534 label=pt1593
+      id=535 label=pt1589
+      id=536 label=pt1957
+      id=537 label=pt1595
+      id=538 label=pt1594
+      id=539 label=pt1596
+      id=540 label=pt1524
+      id=541 label=pt1525
+      id=542 label=pt1993
+      id=543 label=pt1523
+      id=544 label=pt1522
+      id=545 label=pt1519
+      id=546 label=pt1526
+      id=547 label=pt1512
+      id=548 label=pt1507
+      id=549 label=pt1511
+      id=550 label=pt1510
+      id=551 label=pt1509
+      id=552 label=pt1508
+      id=553 label=pt1715
+      id=554 label=pt1713
+      id=555 label=pt1712
+      id=556 label=pt1706
+      id=557 label=pt1718
+      id=558 label=pt1717
+      id=559 label=pt1719
+      id=560 label=pt1723
+      id=562 label=pt1562
+      id=563 label=pt1563
+      id=564 label=pt1570
+      id=565 label=pt1587
+      id=566 label=pt1568
+      id=567 label=pt1586
+      id=568 label=pt1572
+      id=569 label=pt1571
+      id=570 label=pt1588
+      id=571 label=pt1569
+      id=572 label=pt1528
+      id=573 label=pt1530
+      id=574 label=pt1520
+      id=575 label=pt1529
+      id=576 label=pt1521
+      id=577 label=pt1527
+      id=578 label=pt1531
+      id=579 label=pt1513
+      id=580 label=pt1516
+      id=581 label=pt1514
+      id=582 label=pt1517
+      id=583 label=pt1515
+      id=584 label=pt1518
+      id=585 label=pt1708
+      id=586 label=pt1714
+      id=587 label=pt1709
+      id=588 label=pt1716
+      id=589 label=pt1710
+      id=590 label=pt1711
+      id=591 label=pt1702
+      id=592 label=pt1701
+      id=593 label=pt1695
+      id=594 label=pt1700
+      id=595 label=pt1694
+      id=596 label=pt1704
+      id=597 label=pt1703
+      id=598 label=pt1699
+      id=599 label=pt1698
+      id=600 label=pt1697
+      id=601 label=pt1696
+      id=602 label=pt1707
+      id=603 label=pt1705
+      id=604 label=pt1722
+      id=605 label=pt1721
+      id=606 label=pt1720
+      id=607 label=pt1725
+      id=608 label=pt1726
+      id=609 label=pt1724
+      id=610 label=pt1787
+      id=611 label=pt1785
+      id=612 label=pt1784
+      id=613 label=pt1781
+      id=614 label=pt1786
+      id=615 label=pt1789
+      id=616 label=pt1782
+      id=617 label=pt1788
+      id=618 label=pt1777
+      id=619 label=pt1780
+      id=620 label=pt1776
+      id=621 label=pt1778
+      id=622 label=pt1779
+      id=623 label=pt1922
+      id=624 label=pt1921
+      id=625 label=pt1614
+      id=626 label=pt1611
+      id=627 label=pt1608
+      id=628 label=pt1612
+      id=629 label=pt1606
+      id=630 label=pt1605
+      id=631 label=pt1607
+      id=632 label=pt1548
+      id=633 label=pt1547
+      id=634 label=pt1545
+      id=635 label=pt1537
+      id=636 label=pt1539
+      id=637 label=pt1549
+      id=638 label=pt1551
+      id=639 label=pt1550
+      id=640 label=pt1546
+      id=641 label=pt1540
+      id=642 label=pt1544
+      id=643 label=pt1543
+      id=644 label=pt1542
+      id=645 label=pt1541
+      id=646 label=pt1688
+      id=647 label=pt1669
+      id=648 label=pt1686
+      id=649 label=pt1685
+      id=650 label=pt1670
+      id=651 label=pt1687
+      id=652 label=pt1689
+      id=653 label=pt1672
+      id=654 label=pt1691
+      id=655 label=pt1690
+      id=656 label=pt1693
+      id=657 label=pt1692
+      id=658 label=pt1662
+      id=659 label=pt1661
+      id=660 label=pt1655
+      id=661 label=pt1654
+      id=662 label=pt1657
+      id=663 label=pt1656
+      id=664 label=pt1635
+      id=665 label=pt1681
+      id=666 label=pt1636
+      id=667 label=pt1638
+      id=668 label=pt1680
+      id=669 label=pt1639
+      id=670 label=pt1641
+      id=671 label=pt1666
+      id=672 label=pt1647
+      id=673 label=pt1664
+      id=674 label=pt1642
+      id=675 label=pt1643
+      id=676 label=pt1646
+      id=677 label=pt1645
+      id=678 label=pt1665
+      id=679 label=pt1663
+      id=680 label=pt1644
+      id=681 label=pt1658
+      id=682 label=pt1659
+      id=683 label=pt1649
+      id=684 label=pt1648
+      id=685 label=pt1650
+      id=686 label=pt1660
+      id=687 label=pt1760
+      id=688 label=pt1761
+      id=689 label=pt1765
+      id=690 label=pt1763
+      id=691 label=pt1764
+      id=692 label=pt1762
+      id=693 label=pt1651
+      id=694 label=pt1757
+      id=695 label=pt1756
+      id=696 label=pt1653
+      id=697 label=pt1755
+      id=698 label=pt1652
+      id=699 label=pt1759
+      id=700 label=pt1626
+      id=701 label=pt1624
+      id=702 label=pt1735
+      id=703 label=pt1766
+      id=704 label=pt1737
+      id=705 label=pt1736
+      id=706 label=pt1732
+      id=707 label=pt1734
+      id=708 label=pt1733
+      id=709 label=pt1729
+      id=710 label=pt1739
+      id=711 label=pt1738
+      id=712 label=pt1758
+      id=713 label=pt1740
+      id=714 label=pt1741
+      id=715 label=pt1754
+      id=716 label=pt1772
+      id=717 label=pt1773
+      id=718 label=pt1811
+      id=719 label=pt1812
+      id=720 label=pt1728
+      id=721 label=pt1814
+      id=722 label=pt1730
+      id=723 label=pt1727
+      id=724 label=pt1813
+      id=725 label=pt1809
+      id=726 label=pt1810
+      id=727 label=pt1808
+      id=728 label=pt1731
+      id=729 label=pt1807
+      id=730 label=pt1748
+      id=731 label=pt1828
+      id=732 label=pt1815
+      id=733 label=pt1816
+      id=734 label=pt1827
+      id=735 label=pt1825
+      id=736 label=pt1824
+      id=737 label=pt1783
+      id=738 label=pt1795
+      id=739 label=pt1794
+      id=740 label=pt1796
+      id=741 label=pt1806
+      id=742 label=pt1792
+      id=743 label=pt1802
+      id=744 label=pt1793
+      id=745 label=pt1790
+      id=746 label=pt1791
+      id=747 label=pt1919
+      id=750 label=pt1533
+      id=751 label=pt1534
+      id=752 label=pt1535
+      id=753 label=pt1538
+      id=754 label=pt1536
+      id=755 label=pt1444
+      id=756 label=pt1532
+      id=757 label=pt1445
+      id=758 label=pt1668
+      id=759 label=pt1667
+      id=760 label=pt1446
+      id=761 label=pt1447
+      id=762 label=pt1456
+      id=763 label=pt1674
+      id=764 label=pt1671
+      id=765 label=pt1676
+      id=766 label=pt1678
+      id=767 label=pt1679
+      id=768 label=pt1677
+      id=769 label=pt1675
+      id=770 label=pt1682
+      id=771 label=pt1632
+      id=772 label=pt1673
+      id=773 label=pt1684
+      id=774 label=pt1683
+      id=775 label=pt1630
+      id=776 label=pt1458
+      id=777 label=pt1459
+      id=778 label=pt1494
+      id=779 label=pt1490
+      id=780 label=pt1455
+      id=781 label=pt1443
+      id=782 label=pt1449
+      id=783 label=pt1448
+      id=784 label=pt1463
+      id=785 label=pt1451
+      id=786 label=pt1440
+      id=787 label=pt1450
+      id=788 label=pt1438
+      id=789 label=pt1442
+      id=790 label=pt1439
+      id=791 label=pt1468
+      id=792 label=pt1436
+      id=793 label=pt1435
+      id=794 label=pt1437
+      id=795 label=pt1470
+      id=796 label=pt1454
+      id=797 label=pt1457
+      id=798 label=pt1453
+      id=799 label=pt1452
+      id=800 label=pt1480
+      id=801 label=pt1464
+      id=802 label=pt1481
+      id=803 label=pt1462
+      id=804 label=pt1461
+      id=805 label=pt1460
+      id=806 label=pt1465
+      id=807 label=pt1474
+      id=808 label=pt1469
+      id=809 label=pt1467
+      id=810 label=pt1504
+      id=811 label=pt1466
+      id=812 label=pt1640
+      id=813 label=pt1637
+      id=814 label=pt1623
+      id=815 label=pt1633
+      id=816 label=pt1621
+      id=817 label=pt1634
+      id=818 label=pt1631
+      id=819 label=pt1498
+      id=820 label=pt1493
+      id=821 label=pt1484
+      id=822 label=pt1492
+      id=823 label=pt1497
+      id=824 label=pt1496
+      id=825 label=pt1495
+      id=826 label=pt1485
+      id=827 label=pt1768
+      id=828 label=pt1767
+      id=829 label=pt1625
+      id=830 label=pt1629
+      id=831 label=pt1628
+      id=832 label=pt1627
+      id=833 label=pt1620
+      id=834 label=pt1770
+      id=835 label=pt1617
+      id=836 label=pt1769
+      id=837 label=pt1618
+      id=838 label=pt1622
+      id=839 label=pt1616
+      id=840 label=pt1619
+      id=841 label=pt1887
+      id=842 label=pt1488
+      id=843 label=pt1489
+      id=844 label=pt1478
+      id=845 label=pt1479
+      id=846 label=pt1483
+      id=847 label=pt1491
+      id=848 label=pt1482
+      id=849 label=pt1473
+      id=850 label=pt1487
+      id=851 label=pt1486
+      id=852 label=pt1472
+      id=853 label=pt1890
+      id=854 label=pt1873
+      id=855 label=pt1894
+      id=856 label=pt1891
+      id=857 label=pt1893
+      id=858 label=pt1892
+      id=859 label=pt1874
+      id=860 label=pt1477
+      id=861 label=pt1471
+      id=862 label=pt1871
+      id=863 label=pt1475
+      id=864 label=pt1870
+      id=865 label=pt1872
+      id=866 label=pt1476
+      id=867 label=pt1499
+      id=868 label=pt1501
+      id=869 label=pt1500
+      id=870 label=pt1505
+      id=871 label=pt1502
+      id=872 label=pt1503
+      id=873 label=pt1506
+      id=874 label=pt1999
+      id=875 label=pt1752
+      id=876 label=pt1771
+      id=877 label=pt1751
+      id=878 label=pt1747
+      id=879 label=pt1775
+      id=880 label=pt1744
+      id=881 label=pt1774
+      id=882 label=pt1745
+      id=883 label=pt1902
+      id=884 label=pt1886
+      id=885 label=pt1899
+      id=886 label=pt1900
+      id=887 label=pt1901
+      id=888 label=pt1888
+      id=889 label=pt1885
+      id=890 label=pt1753
+      id=891 label=pt1746
+      id=892 label=pt1896
+      id=893 label=pt1743
+      id=894 label=pt1749
+      id=895 label=pt1750
+      id=896 label=pt1742
+      id=897 label=pt1854
+      id=898 label=pt1820
+      id=899 label=pt1853
+      id=900 label=pt1819
+      id=901 label=pt1818
+      id=902 label=pt1817
+      id=903 label=pt1823
+      id=904 label=pt1832
+      id=905 label=pt1830
+      id=906 label=pt1878
+      id=907 label=pt1875
+      id=908 label=pt1877
+      id=909 label=pt1889
+      id=910 label=pt1898
+      id=911 label=pt1880
+      id=912 label=pt1897
+      id=913 label=pt1895
+      id=914 label=pt1847
+      id=915 label=pt1848
+      id=916 label=pt1857
+      id=917 label=pt1849
+      id=918 label=pt1851
+      id=919 label=pt1859
+      id=920 label=pt1850
+      id=921 label=pt1876
+      id=922 label=pt1881
+      id=923 label=pt1879
+      id=924 label=pt1883
+      id=925 label=pt1882
+      id=926 label=pt1884
+      id=927 label=pt1905
+      id=928 label=pt1908
+      id=929 label=pt1906
+      id=930 label=pt1907
+      id=931 label=pt1904
+      id=932 label=pt1903
+      id=933 label=pt1862
+      id=934 label=pt1910
+      id=935 label=pt1911
+      id=936 label=pt1909
+      id=937 label=pt1826
+      id=938 label=pt1822
+      id=939 label=pt1805
+      id=940 label=pt1821
+      id=941 label=pt1804
+      id=942 label=pt1829
+      id=943 label=pt1831
+      id=944 label=pt1801
+      id=945 label=pt1800
+      id=946 label=pt1839
+      id=947 label=pt1840
+      id=948 label=pt1838
+      id=949 label=pt1856
+      id=950 label=pt1837
+      id=951 label=pt1855
+      id=952 label=pt1841
+      id=953 label=pt1797
+      id=954 label=pt1798
+      id=955 label=pt1799
+      id=956 label=pt1833
+      id=957 label=pt1803
+      id=958 label=pt1915
+      id=959 label=pt1913
+      id=960 label=pt1912
+      id=961 label=pt1933
+      id=962 label=pt1931
+      id=963 label=pt1914
+      id=968 label=pt1858
+      id=969 label=pt1852
+      id=970 label=pt1842
+      id=971 label=pt1843
+      id=972 label=pt1845
+      id=973 label=pt1836
+      id=974 label=pt1835
+      id=975 label=pt1846
+      id=976 label=pt1834
+      id=977 label=pt1935
+      id=978 label=pt1928
+      id=979 label=pt1934
+      id=980 label=pt1927
+      id=984 label=pt1869
+      id=985 label=pt1860
+      id=986 label=pt1867
+      id=987 label=pt1868
+      id=988 label=pt1863
+      id=989 label=pt1861
+      id=990 label=pt1865
+      id=991 label=pt1864
+      id=992 label=pt1866
+      id=993 label=pt1844
+      id=994 label=pt1926
+      id=995 label=pt1937
+      id=996 label=pt1938
+      id=1531 label=pt574
+      id=1532 label=pt571
+      id=1533 label=pt570
+      id=1534 label=pt569
+      id=1536 label=pt603
+      id=1537 label=pt604
+      id=1538 label=pt605
+      id=1540 label=pt589
+      id=1541 label=pt588
+      id=1542 label=pt586
+      id=1543 label=pt587
+      id=1545 label=pt583
+      id=1546 label=pt584
+      id=1547 label=pt572
+      id=1548 label=pt585
+      id=1549 label=pt573
+      id=1550 label=pt674
+      id=1551 label=pt667
+      id=1552 label=pt673
+      id=1553 label=pt670
+      id=1554 label=pt671
+      id=1555 label=pt672
+      id=1556 label=pt678
+      id=1557 label=pt668
+      id=1558 label=pt675
+      id=1559 label=pt677
+      id=1560 label=pt676
+      id=1561 label=pt666
+      id=1583 label=pt556
+      id=1584 label=pt557
+      id=1585 label=pt547
+      id=1586 label=pt548
+      id=1587 label=pt582
+      id=1588 label=pt581
+      id=1589 label=pt558
+      id=1590 label=pt565
+      id=1591 label=pt566
+      id=1592 label=pt669
+      id=1593 label=pt567
+      id=1595 label=pt519
+      id=1600 label=pt681
+      id=1750 label=pt507
+      id=1751 label=pt509
+      id=1752 label=pt480
+      id=1753 label=pt479
+      id=1754 label=pt470
+      id=1755 label=pt504
+      id=1756 label=pt501
+      id=1812 label=pt508
+      id=1813 label=pt510
+      id=1843 label=pt505
+      id=1844 label=pt497
+      id=1845 label=pt498
+      id=1863 label=pt407
+      id=1864 label=pt506
+  $ bonsai query knn 500 500 5
+    5 nearest to (500, 500):
+      id=790 dist=46.5356 label=pt1439
+      id=788 dist=48.3306 label=pt1438
+      id=786 dist=50.7207 label=pt1440
+      id=792 dist=56.2563 label=pt1436
+      id=794 dist=59.1399 label=pt1437
+  $ bonsai visualise
+    index visualisation — 2000 points, backend: KDTree
+    x: [47.31, 896.94]  y: [36.01, 730.24]
+    ┌────────────────────────────────────────────────────────────┐
+    │                           ·                                │
+    │                        ··++:··                             │
+    │                         **:+·                              │
+    │                        ·+*+:·                              │
+    │                        ··:·:·                              │
+    │                     ·:+::·                                 │
+    │                    ·::+::                                  │
+    │                                                            │
+    │                                              :·····        │
+    │                                              ·:+++:   ···  │
+    │                                                 ·  ··+++·  │
+    │                                  ··                 ··::·  │
+    │                                 ·:+:·                      │
+    │    ··                           ·:++:                      │
+    │  ·+**:·                                                    │
+    │   :····                                        ··          │
+    │                              ··         · · ·+:++·         │
+    │                            :+++:·     ·+#*::· :::          │
+    │                             ····       ·· ··               │
+    │                                                            │
+    └────────────────────────────────────────────────────────────┘
+    density: ' '=0  '·'=low  ':'=med  '+'=high  '*'=very high  '#'=max
+
+=== 16. Range-query latency (uniform 2D, 100k points, 1000 queries) ===
+  backend       p50 (ns)    p95 (ns)    p99 (ns)
+  ----------------------------------------------
+  RTree           624916      651208      674292
+  KDTree         4285292     4376834     4643000
+  Quadtree       4334333     4428250     4708375
+  Grid            989375     1015083     1060708
