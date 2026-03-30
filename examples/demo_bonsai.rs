@@ -20,6 +20,12 @@
 //!                      run the §4 range query and §5 kNN; print stats
 //!  13. Serialisation — build 1 000-point index, to_bytes, from_bytes, verify
 //!                      range query results match (feature = "serde")
+//!  14. C FFI         — exercise the extern "C" API with 3 §1 points and the
+//!                      §4 bbox (feature = "ffi")
+//!  15. CLI           — load the first 100 §1 points via `load`, stream the
+//!                      remaining 1 900 via `stream` (stdin pipe), then run
+//!                      stats, the §4 range query, kNN, and visualise on the
+//!                      full 2 000-point dataset
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
@@ -748,5 +754,139 @@ fn main() {
             println!("  bonsai_free(null) — no-op: ok");
             println!("  FFI round-trip: all assertions passed");
         }
+    }
+
+    // ── 15. CLI — load first 100 §1 points, stream remaining 1900, inspect ──
+    // Writes the §1 Hilbert-sorted points to two CSVs: the first 100 go
+    // through `load` (batch), the remaining 1900 are piped into `stream`
+    // (continuous). After streaming, `stats` and `visualise` operate on the
+    // full 2 000-point dataset — the same one that has run through every
+    // earlier section. The §4 range query bbox [300,700]^2 is reused so the
+    // result count is directly comparable.
+    #[cfg(feature = "serde")]
+    {
+        use std::process::{Command, Stdio};
+
+        println!("\n=== 15. CLI demo (feature = \"serde\", 2 000 §1 points) ===");
+
+        let mut csv_batch = String::from("x,y,label\n");
+        for (i, (_, p)) in sorted.iter().take(100).enumerate() {
+            csv_batch.push_str(&format!(
+                "{:.3},{:.3},pt{}\n",
+                p.coords()[0],
+                p.coords()[1],
+                i
+            ));
+        }
+
+        let mut csv_stream = String::new();
+        for (i, (_, p)) in sorted.iter().skip(100).enumerate() {
+            csv_stream.push_str(&format!(
+                "{:.3},{:.3},pt{}\n",
+                p.coords()[0],
+                p.coords()[1],
+                100 + i
+            ));
+        }
+
+        let csv_path = std::env::temp_dir().join("bonsai_demo_batch.csv");
+        std::fs::write(&csv_path, &csv_batch).expect("failed to write batch CSV");
+
+        let work_dir = std::env::temp_dir().join("bonsai_cli_demo");
+        std::fs::create_dir_all(&work_dir).ok();
+
+        let bin_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| {
+                p.parent()
+                    .and_then(|examples_dir| examples_dir.parent())
+                    .map(|debug_dir| debug_dir.join("bonsai"))
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("target/debug/bonsai"));
+
+        let run = |args: &[&str]| {
+            let cmd_str = format!(
+                "bonsai {}",
+                args.iter()
+                    .map(|a| {
+                        if a.contains(' ') {
+                            format!("\"{}\"", a)
+                        } else {
+                            a.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            println!("  $ {}", cmd_str);
+
+            let output = Command::new(&bin_path)
+                .args(args)
+                .current_dir(&work_dir)
+                .output();
+
+            match output {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    for line in stdout.lines() {
+                        println!("    {}", line);
+                    }
+                    if !stderr.is_empty() {
+                        for line in stderr.lines() {
+                            println!("    [stderr] {}", line);
+                        }
+                    }
+                    if !out.status.success() {
+                        println!("    [exit {}]", out.status);
+                    }
+                    out.status.success()
+                }
+                Err(e) => {
+                    println!("    [error] could not run bonsai binary: {}", e);
+                    println!("    (build with: cargo build --features serde --bin bonsai)");
+                    false
+                }
+            }
+        };
+
+        let csv_str = csv_path.to_string_lossy().to_string();
+
+        run(&["load", &csv_str]);
+
+        // Stream the remaining 1 900 points through stdin so the profiler
+        // observes the full evolving distribution.
+        println!("  $ bonsai stream --interval 500  (piping 1 900 points via stdin)");
+        let stream_result = Command::new(&bin_path)
+            .args(["stream", "--interval", "500"])
+            .current_dir(&work_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        match stream_result {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = std::io::Write::write_all(&mut stdin, csv_stream.as_bytes());
+                }
+                if let Ok(out) = child.wait_with_output() {
+                    for line in String::from_utf8_lossy(&out.stdout).lines() {
+                        println!("    {}", line);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("    [error] could not run bonsai stream: {}", e);
+            }
+        }
+
+        run(&["stats"]);
+        run(&["query", "range", "300", "300", "700", "700"]);
+        run(&["query", "knn", "500", "500", "5"]);
+        run(&["visualise"]);
+
+        std::fs::remove_file(&csv_path).ok();
+        std::fs::remove_dir_all(&work_dir).ok();
     }
 }
