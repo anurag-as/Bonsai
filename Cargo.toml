@@ -5,6 +5,9 @@ edition = "2021"
 description = "A zero-dependency, embeddable, self-tuning spatial index for Rust"
 license = "MIT"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [features]
 default = []
 serde   = ["dep:serde", "dep:bincode"]
