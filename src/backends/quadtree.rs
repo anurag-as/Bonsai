@@ -88,9 +88,9 @@ impl<C: CoordType, const D: usize> QuadNode<C, D> {
     }
 
     fn insert(&mut self, point: Point<C, D>, id: EntryId) {
-        if self.children.is_some() {
+        if let Some(ref mut children) = self.children {
             let ci = self.child_index(&point);
-            self.children.as_mut().unwrap()[ci].insert(point, id);
+            children[ci].insert(point, id);
             return;
         }
         self.entries.push((point, id));

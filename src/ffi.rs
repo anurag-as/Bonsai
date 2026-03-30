@@ -35,7 +35,7 @@ unsafe impl Sync for BonsaiHandle {}
 /// Bonsai stores the pointer as-is and never dereferences it; lifetime
 /// management is the caller's responsibility.
 #[derive(Clone, Copy)]
-pub struct OpaquePayload(*mut std::ffi::c_void);
+pub struct OpaquePayload(#[allow(dead_code)] *mut std::ffi::c_void);
 
 // SAFETY: same contract as `BonsaiHandle` above.
 unsafe impl Send for OpaquePayload {}
