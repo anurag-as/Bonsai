@@ -91,7 +91,7 @@ impl<const D: usize> PolicyEngine<D> {
     ///
     /// Sets the `migrating` flag and resets the hysteresis counter.
     /// `current_backend` is updated only when the migration completes via
-    /// [`on_migration_complete`].
+    /// [`Self::on_migration_complete`].
     pub fn on_migration_started(&mut self) {
         self.migrating = true;
         self.observations_since_migration = 0;

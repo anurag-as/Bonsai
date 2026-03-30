@@ -108,7 +108,8 @@ pub struct MigrationResult {
 /// 1. **Bulk load** — snapshot all existing entries, sort by Hilbert index,
 ///    bulk-load into the new backend.
 /// 2. **Transition** — set `migrating = true`; callers must route new
-///    inserts/removes to both backends via [`MigrationEngine::apply_delta`].
+///    inserts/removes to both backends via [`MigrationEngine::record_insert`] /
+///    [`MigrationEngine::record_remove`].
 /// 3. **Drain** — replay the delta log (entries written after the snapshot)
 ///    into the shadow backend.
 /// 4. **Atomic swap** — replace the active backend with the shadow, drop the

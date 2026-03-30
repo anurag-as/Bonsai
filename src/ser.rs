@@ -66,7 +66,7 @@ where
     /// Encode the full index state to bytes.
     ///
     /// The format includes a magic header, version, dimensionality, active
-    /// backend kind, configuration, and all entries. Use [`from_bytes`] to
+    /// backend kind, configuration, and all entries. Use [`Self::from_bytes`] to
     /// restore.
     ///
     /// # Example
@@ -120,7 +120,7 @@ where
         bincode::serialize(&serialized).expect("bincode serialization is infallible for valid data")
     }
 
-    /// Decode bytes produced by [`to_bytes`] back into a `BonsaiIndex`.
+    /// Decode bytes produced by [`Self::to_bytes`] back into a `BonsaiIndex`.
     ///
     /// Returns `Err(BonsaiError::Serialisation)` on any malformed input —
     /// never panics.
