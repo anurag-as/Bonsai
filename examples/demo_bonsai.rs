@@ -14,8 +14,12 @@
 //!  10. Migration     — execute the §9 decision: migrate the §1 KD-tree to the
 //!                      policy-chosen backend; verify range query results are
 //!                      identical before and after
-//!  11. IndexRouter + StatsCollector — 4 insert threads × 1 000 points each,
-//!                      2 query threads; print totals from StatsCollector
+//!  11. IndexRouter + StatsCollector — wrap the §10 migrated backend in an
+//!                      IndexRouter; re-insert the §1 dataset across 4 threads
+//!                      while 2 threads query the §4 bbox; StatsCollector
+//!                      tracks all inserts and queries lock-free
+//!  12. BonsaiIndex   — canonical builder-pattern example: insert 5 named 2D
+//!                      points, run a range query, run kNN(k=2), print stats
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
@@ -477,36 +481,79 @@ fn main() {
     );
     println!("  Migration duration: {:?}", mig_result.duration);
 
-    // ── 11. IndexRouter + StatsCollector — concurrent inserts and queries ─────
-    println!("\n=== 11. IndexRouter + StatsCollector (4 insert threads × 1 000 pts, 2 query threads) ===");
+    // ── 11. IndexRouter + StatsCollector — concurrent stress on the migrated index
+    //
+    // We take the backend that §10 migrated to and hand it to an IndexRouter.
+    // The §1 dataset is split into 4 equal chunks — one per insert thread —
+    // so the same 2 000 points flow through the router concurrently.
+    // Two query threads run the §4 bbox in a tight loop throughout.
+    // StatsCollector records every insert and query without a lock.
+    println!("\n=== 11. IndexRouter + StatsCollector (§10 backend, §1 dataset, 4+2 threads) ===");
+    println!("  Backend from §10 migration: {:?}", mig_result.new_backend);
 
-    let router: Arc<IndexRouter<usize, f64, 2>> =
-        Arc::new(IndexRouter::new(Box::new(KDTree::<usize, f64, 2>::new())));
+    // Rebuild the migrated backend via bulk_load so IndexRouter owns it.
+    let migrated_backend: Box<dyn bonsai::backends::SpatialBackend<usize, f64, 2>> =
+        match mig_result.new_backend {
+            BackendKind::RTree => Box::new(RTree::<usize, f64, 2>::bulk_load(
+                sorted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, p))| (*p, i))
+                    .collect(),
+            )),
+            BackendKind::KDTree => Box::new(KDTree::<usize, f64, 2>::bulk_load(
+                sorted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, p))| (*p, i))
+                    .collect(),
+            )),
+            BackendKind::Quadtree => Box::new(Quadtree::<usize, f64, 2>::bulk_load(
+                sorted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, p))| (*p, i))
+                    .collect(),
+            )),
+            BackendKind::Grid => Box::new(GridIndex::<usize, f64, 2>::bulk_load(
+                sorted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, p))| (*p, i))
+                    .collect(),
+            )),
+        };
+
+    let router: Arc<IndexRouter<usize, f64, 2>> = Arc::new(IndexRouter::new(migrated_backend));
     let sc: Arc<StatsCollector> = Arc::new(StatsCollector::new());
+
+    // Split the §1 Hilbert-sorted points into 4 chunks for the insert threads.
+    let chunks: Vec<Vec<Point<f64, 2>>> = {
+        let pts: Vec<Point<f64, 2>> = sorted.iter().map(|(_, p)| *p).collect();
+        let chunk_size = pts.len() / 4;
+        pts.chunks(chunk_size).map(|c| c.to_vec()).collect()
+    };
 
     let mut handles = Vec::new();
 
-    // 4 insert threads, each inserting 1 000 points.
-    for t in 0..4u64 {
+    // 4 insert threads — each re-inserts its chunk of the §1 dataset.
+    for (t, chunk) in chunks.into_iter().enumerate() {
         let r = Arc::clone(&router);
         let s = Arc::clone(&sc);
         handles.push(std::thread::spawn(move || {
-            let mut lcg = Lcg::new(t.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1));
-            for _ in 0..1_000 {
-                let x = lcg.next_f64() * 1_000.0;
-                let y = lcg.next_f64() * 1_000.0;
-                r.insert(Point::new([x, y]), t as usize);
+            for (i, p) in chunk.into_iter().enumerate() {
+                r.insert(p, t * 500 + i);
                 s.record_insert();
             }
         }));
     }
 
-    // 2 query threads, each running 200 range queries.
-    for _ in 0..2u64 {
+    // 2 query threads — each runs the §4 bbox in a loop while inserts happen.
+    for _ in 0..2usize {
         let r = Arc::clone(&router);
         let s = Arc::clone(&sc);
+        let bbox = query_bbox;
         handles.push(std::thread::spawn(move || {
-            let bbox = BBox::new(Point::new([200.0, 200.0]), Point::new([800.0, 800.0]));
             for _ in 0..200 {
                 let t0 = std::time::Instant::now();
                 let _ = r.range_query(&bbox);
@@ -519,12 +566,49 @@ fn main() {
         h.join().expect("thread panicked");
     }
 
-    println!("  Total points inserted : {}", router.len());
-    println!("  StatsCollector inserts: {}", sc.insert_count());
-    println!("  StatsCollector queries: {}", sc.query_count());
-    println!("  Mean query latency    : {} ns", sc.mean_query_ns());
+    // The router started with N points (bulk-loaded from §10) and each insert
+    // thread added another chunk — total should be N + N = 2*N.
     println!(
-        "  No panics or data races: yes (all {} threads joined cleanly)",
-        6
+        "  Points after concurrent inserts: {} (started with {N}, added {N})",
+        router.len()
+    );
+    println!("  StatsCollector inserts : {}", sc.insert_count());
+    println!("  StatsCollector queries : {}", sc.query_count());
+    println!("  Mean query latency     : {} ns", sc.mean_query_ns());
+    println!("  No panics or data races: yes (all 6 threads joined cleanly)");
+
+    // ── 12. BonsaiIndex — canonical 10-line usage example ────────────────────
+    println!("\n=== 12. BonsaiIndex<&str> — builder pattern, insert, range query, kNN, stats ===");
+
+    let mut bonsai = bonsai::index::BonsaiIndex::<&str>::builder()
+        .reservoir_size(256)
+        .build();
+
+    bonsai.insert(Point::new([100.0, 200.0]), "alpha");
+    bonsai.insert(Point::new([300.0, 400.0]), "beta");
+    bonsai.insert(Point::new([500.0, 600.0]), "gamma");
+    bonsai.insert(Point::new([700.0, 800.0]), "delta");
+    bonsai.insert(Point::new([900.0, 100.0]), "epsilon");
+
+    let range_bbox = BBox::new(Point::new([0.0, 0.0]), Point::new([600.0, 700.0]));
+    let range_hits = bonsai.range_query(&range_bbox);
+    println!(
+        "  Range query [0,600]^2 × [0,700]: {} hit(s)",
+        range_hits.len()
+    );
+    for (id, payload) in &range_hits {
+        println!("    {:?}  {}", id, payload);
+    }
+
+    let knn_results = bonsai.knn_query(&Point::new([400.0, 400.0]), 2);
+    println!("  kNN(k=2) from (400, 400):");
+    for (dist, id, payload) in &knn_results {
+        println!("    {:?}  {}  dist={:.2}", id, payload, dist);
+    }
+
+    let s = bonsai.stats();
+    println!(
+        "  stats: backend={:?}  point_count={}",
+        s.backend, s.point_count
     );
 }

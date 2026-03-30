@@ -35,11 +35,11 @@ where
         }))
     }
 
-    fn read(&self) -> RwLockReadGuard<'_, Box<dyn SpatialBackend<T, C, D>>> {
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Box<dyn SpatialBackend<T, C, D>>> {
         self.inner.read().expect("backend RwLock poisoned")
     }
 
-    fn write(&self) -> RwLockWriteGuard<'_, Box<dyn SpatialBackend<T, C, D>>> {
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Box<dyn SpatialBackend<T, C, D>>> {
         self.inner.write().expect("backend RwLock poisoned")
     }
 }
@@ -146,6 +146,17 @@ where
     /// Return `true` if a migration is currently in progress.
     pub fn is_migrating(&self) -> bool {
         self.migrating.load(Ordering::SeqCst)
+    }
+
+    /// Return the raw pointer to the active [`BackendBox`].
+    ///
+    /// # Safety
+    ///
+    /// The returned pointer is valid as long as the `IndexRouter` is alive and
+    /// no concurrent `commit_migration` call has completed. Callers must not
+    /// store the pointer beyond the lifetime of the `IndexRouter`.
+    pub(crate) fn active_ptr(&self) -> *mut BackendBox<T, C, D> {
+        self.active.load(Ordering::SeqCst)
     }
 
     /// Install a shadow backend and set the migrating flag.
