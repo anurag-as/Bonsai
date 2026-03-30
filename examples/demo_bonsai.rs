@@ -12,22 +12,22 @@
 //!   8. CostModel     — rank backends using the §7 DataShape
 //!   9. PolicyEngine  — tick on the §7 shape; decide to migrate §3 KD-tree
 //!  10. Migration     — execute the §9 decision on the §3 KD-tree; verify §4
-//!                      range query results are identical before and after
+//!      range query results are identical before and after
 //!  11. IndexRouter + StatsCollector — wrap the §10 migrated backend; 4 insert
-//!                      threads re-add the §1 points while 2 query threads run
-//!                      the §4 bbox; StatsCollector tracks everything lock-free
+//!      threads re-add the §1 points while 2 query threads run
+//!      the §4 bbox; StatsCollector tracks everything lock-free
 //!  12. BonsaiIndex   — load the §1 dataset through the high-level public API;
-//!                      run the §4 range query and §5 kNN; print stats
+//!      run the §4 range query and §5 kNN; print stats
 //!  13. Serialisation — build 1 000-point index, to_bytes, from_bytes, verify
-//!                      range query results match (feature = "serde")
+//!      range query results match (feature = "serde")
 //!  14. C FFI         — exercise the extern "C" API with 3 §1 points and the
-//!                      §4 bbox (feature = "ffi")
+//!      §4 bbox (feature = "ffi")
 //!  15. CLI           — load the first 100 §1 points via `load`, stream the
-//!                      remaining 1 900 via `stream` (stdin pipe), then run
-//!                      stats, the §4 range query, kNN, and visualise on the
-//!                      full 2 000-point dataset
+//!      remaining 1 900 via `stream` (stdin pipe), then run
+//!      stats, the §4 range query, kNN, and visualise on the
+//!      full 2 000-point dataset
 //!  16. Latency table — build fresh 100k-point uniform 2D backends; time 1 000
-//!                      §4 range queries each; print p50/p95/p99 per backend
+//!      §4 range queries each; print p50/p95/p99 per backend
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
