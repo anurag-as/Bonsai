@@ -18,9 +18,12 @@
 //!                      the §4 bbox; StatsCollector tracks everything lock-free
 //!  12. BonsaiIndex   — load the §1 dataset through the high-level public API;
 //!                      run the §4 range query and §5 kNN; print stats
+//!  13. Serialisation — build 1 000-point index, to_bytes, from_bytes, verify
+//!                      range query results match (feature = "serde")
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
+//!   cargo run --example demo_bonsai --features serde
 
 use std::sync::Arc;
 
@@ -588,4 +591,47 @@ fn main() {
         "  stats: backend={:?}  point_count={}  queries={}",
         s.backend, s.point_count, s.query_count,
     );
+
+    // ── 13. Serialisation — round-trip the §12 BonsaiIndex through to_bytes/from_bytes ─
+    // Uses the same §12 `bonsai` index (N §1 points) and the §4 query bbox so
+    // the result count is directly comparable to every earlier section.
+    #[cfg(feature = "serde")]
+    {
+        println!("\n=== 13. Serialisation (feature = \"serde\", §12 index, {N} points) ===");
+
+        let bytes = bonsai.to_bytes();
+        println!("  Serialised {N} points → {} bytes", bytes.len());
+
+        let mut restored = bonsai::index::BonsaiIndex::<usize>::from_bytes(&bytes)
+            .expect("deserialisation must succeed on valid bytes");
+
+        // Re-run the §4 range query on both the original and the restored index.
+        let mut orig_hits = bonsai.range_query(&query_bbox);
+        let mut rest_hits = restored.range_query(&query_bbox);
+
+        // Sort by payload (stable across re-insertion) rather than EntryId
+        // (which is reassigned on decode).
+        orig_hits.sort_by_key(|(_, p)| *p);
+        rest_hits.sort_by_key(|(_, p)| *p);
+
+        let orig_payloads: Vec<usize> = orig_hits.iter().map(|(_, p)| *p).collect();
+        let rest_payloads: Vec<usize> = rest_hits.iter().map(|(_, p)| *p).collect();
+
+        println!(
+            "  §4 range query: original={} restored={}  brute={brute}  match={}",
+            orig_payloads.len(),
+            rest_payloads.len(),
+            if orig_payloads == rest_payloads {
+                "yes"
+            } else {
+                "NO"
+            },
+        );
+
+        if orig_payloads.len() <= 5 {
+            println!("  Payloads: {:?}", orig_payloads);
+        } else {
+            println!("  First 5 payloads: {:?}", &orig_payloads[..5]);
+        }
+    }
 }

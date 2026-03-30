@@ -8,6 +8,9 @@ pub mod router;
 pub mod stats;
 pub mod types;
 
+#[cfg(feature = "serde")]
+pub mod ser;
+
 pub use backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 pub use index::{BonsaiConfig, BonsaiIndex};
 pub use profiler::{

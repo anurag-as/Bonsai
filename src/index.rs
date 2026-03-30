@@ -171,18 +171,14 @@ where
     C: CoordType,
     T: Clone + Send + Sync + 'static,
 {
-    router: Arc<IndexRouter<T, C, D>>,
+    pub(crate) router: Arc<IndexRouter<T, C, D>>,
     profiler: Profiler<C, D>,
     stats: Arc<StatsCollector>,
-    /// Bloom cache populated with inserted point bboxes.
-    /// `range_query` checks this before hitting the backend; `DefinitelyAbsent`
-    /// means no point with that exact bbox was ever inserted, so the result is
-    /// guaranteed empty and the backend is skipped.
     bloom: BloomCache<D>,
-    config: BonsaiConfig,
-    migration_count: u64,
-    frozen: bool,
-    point_count: usize,
+    pub(crate) config: BonsaiConfig,
+    pub(crate) migration_count: u64,
+    pub(crate) frozen: bool,
+    pub(crate) point_count: usize,
 }
 
 impl<T, C, const D: usize> std::fmt::Debug for BonsaiIndex<T, C, D>

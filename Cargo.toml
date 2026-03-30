@@ -7,13 +7,14 @@ license = "MIT"
 
 [features]
 default = []
-serde   = ["dep:serde"]
+serde   = ["dep:serde", "dep:bincode"]
 wasm    = ["dep:wasm-bindgen"]
 ffi     = []
 full    = ["serde", "wasm", "ffi"]
 
 [dependencies]
 serde        = { version = "1", features = ["derive"], optional = true }
+bincode      = { version = "1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [dev-dependencies]
