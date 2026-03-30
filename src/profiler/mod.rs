@@ -4,6 +4,7 @@
 //! computation, and query workload tracking. Observations are received via a
 //! lock-free MPSC channel and processed in batches of 64.
 
+pub mod cost_model;
 pub mod reservoir;
 pub mod stats;
 
@@ -12,6 +13,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use crate::types::{CoordType, DataShape, Point, QueryMix};
 use reservoir::ReservoirSampler;
 use stats::OnlineStats;
+
+pub use cost_model::{CostEstimate, CostModel};
 
 /// The type of query observation sent to the profiler.
 #[derive(Debug, Clone, Copy)]

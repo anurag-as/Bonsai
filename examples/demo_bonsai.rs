@@ -15,8 +15,8 @@
 use bonsai::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use bonsai::bloom::{BloomCache, BloomResult};
 use bonsai::hilbert::HilbertCurve;
-use bonsai::profiler::{Observation, Profiler, QueryKind};
-use bonsai::types::{BBox, EntryId, Point};
+use bonsai::profiler::{CostModel, Observation, Profiler, QueryKind};
+use bonsai::types::{BBox, BackendKind, DataShape, EntryId, Point};
 struct Lcg(u64);
 impl Lcg {
     fn new(seed: u64) -> Self {
@@ -412,4 +412,96 @@ fn main() {
             );
         }
     }
+
+    // ── 8. CostModel — feed the live Profiler shapes from §7 into the model ────
+    println!("\n=== 8. CostModel demo (shapes from live Profiler output, D=2) ===");
+    println!("  (selectivity injected as 0.01 to match the range queries recorded in §7)");
+
+    fn print_cost_table(label: &str, shape: &DataShape<2>) {
+        let estimates = CostModel::<2>::estimate_all(shape, QueryKind::Range);
+        let cheapest = CostModel::<2>::cheapest(shape, QueryKind::Range);
+        println!("  {label}:");
+        for e in &estimates {
+            let marker = if e.backend == cheapest {
+                " ← cheapest"
+            } else {
+                ""
+            };
+            let name = match e.backend {
+                BackendKind::RTree => "R-tree   ",
+                BackendKind::KDTree => "KD-tree  ",
+                BackendKind::Grid => "Grid     ",
+                BackendKind::Quadtree => "Quadtree ",
+            };
+            println!("    {name}  cost = {:>10.4}{marker}", e.cost);
+        }
+    }
+
+    // Re-run the two profilers from §7 and capture their DataShapes.
+    let uniform_shape: DataShape<2> = {
+        let mut profiler = Profiler::<f64, 2>::new(4096);
+        let mut rng = Lcg::new(0xdeadbeef);
+        for _ in 0..50_000usize {
+            let x = rng.next_f64() * DOMAIN;
+            let y = rng.next_f64() * DOMAIN;
+            profiler.observe(Observation::Insert(Point::new([x, y])));
+        }
+        for _ in 0..200 {
+            profiler.observe(Observation::Query {
+                kind: QueryKind::Range,
+                selectivity: 0.01,
+                hit: true,
+            });
+        }
+        profiler.flush();
+        profiler.data_shape().unwrap().clone()
+    };
+
+    let clustered_shape: DataShape<2> = {
+        let mut profiler = Profiler::<f64, 2>::new(4096);
+        let mut rng = Lcg::new(0xcafebabe);
+        let centres: Vec<[f64; 2]> = (0..10)
+            .map(|_| {
+                [
+                    rng.next_f64() * 800.0 + 100.0,
+                    rng.next_f64() * 800.0 + 100.0,
+                ]
+            })
+            .collect();
+        for i in 0..50_000usize {
+            let c = &centres[i % 10];
+            let x = (c[0] + rng.next_normal() * 5.0).clamp(0.0, DOMAIN);
+            let y = (c[1] + rng.next_normal() * 5.0).clamp(0.0, DOMAIN);
+            profiler.observe(Observation::Insert(Point::new([x, y])));
+        }
+        for _ in 0..200 {
+            profiler.observe(Observation::Query {
+                kind: QueryKind::Range,
+                selectivity: 0.01,
+                hit: true,
+            });
+        }
+        profiler.flush();
+        profiler.data_shape().unwrap().clone()
+    };
+
+    print_cost_table(
+        &format!(
+            "Uniform   (n={}, clustering_coef={:.4}, selectivity={:.4})",
+            uniform_shape.point_count,
+            uniform_shape.clustering_coef,
+            uniform_shape.query_mix.mean_selectivity,
+        ),
+        &uniform_shape,
+    );
+    print_cost_table(
+        &format!(
+            "Clustered (n={}, clustering_coef={:.4}, selectivity={:.4})",
+            clustered_shape.point_count,
+            clustered_shape.clustering_coef,
+            clustered_shape.query_mix.mean_selectivity,
+        ),
+        &clustered_shape,
+    );
+    println!("  (Ranking shifts because KD-tree and Grid costs scale with clustering_coef)");
 }
