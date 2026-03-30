@@ -8,6 +8,9 @@
 //!   4. Range query   — Bloom gates all four backends; brute-force oracle check
 //!   5. kNN query     — all four backends, results compared
 //!   6. Insert-remove — remove half the entries from every backend, verify absence
+//!   7. Profiler      — feed the §1 dataset into the profiler; measure DataShape
+//!   8. CostModel     — rank backends using the §7 DataShape
+//!   9. PolicyEngine  — tick on the §7 shape; show migration decision
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
@@ -15,8 +18,8 @@
 use bonsai::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use bonsai::bloom::{BloomCache, BloomResult};
 use bonsai::hilbert::HilbertCurve;
-use bonsai::profiler::{CostModel, Observation, Profiler, QueryKind};
-use bonsai::types::{BBox, BackendKind, DataShape, EntryId, Point};
+use bonsai::profiler::{CostModel, Observation, PolicyEngine, Profiler, QueryKind};
+use bonsai::types::{BBox, BackendKind, EntryId, Point};
 struct Lcg(u64);
 impl Lcg {
     fn new(seed: u64) -> Self {
@@ -290,218 +293,114 @@ fn main() {
         if all_ok { "yes" } else { "NO" }
     );
 
-    // ── 7. Profiler demo — uniform vs clustered data ──────────────────────────
-    println!("\n=== 7. Profiler demo (50k uniform vs 50k clustered points, D=2) ===");
-    println!("  (reservoir capped at 4096; stats computed on reservoir sample)");
+    // ── 7. Profiler — observe the §1 dataset, measure DataShape ─────────────
+    println!("\n=== 7. Profiler (the {N}-point §1 dataset, reservoir=512) ===");
 
-    const PROF_N: usize = 50_000;
-    const PROF_DOMAIN: f64 = 1_000.0;
-    const PROF_CLUSTERS: usize = 10;
-    const PROF_SIGMA: f64 = 5.0; // σ << domain → tight clusters
+    let mut profiler = Profiler::<f64, 2>::new(512);
 
-    // ── 7a. Uniform data ──────────────────────────────────────────────────────
-    {
-        let mut profiler = Profiler::<f64, 2>::new(4096);
-        let mut rng = Lcg::new(0xdeadbeef);
-
-        for _ in 0..PROF_N {
-            let x = rng.next_f64() * PROF_DOMAIN;
-            let y = rng.next_f64() * PROF_DOMAIN;
-            profiler.observe(Observation::Insert(Point::new([x, y])));
-        }
-        // Also record some range queries.
-        for _ in 0..200 {
-            profiler.observe(Observation::Query {
-                kind: QueryKind::Range,
-                selectivity: 0.01,
-                hit: true,
-            });
-        }
-        profiler.flush();
-
-        if let Some(shape) = profiler.data_shape() {
-            println!("  Uniform data ({PROF_N} points):");
-            println!("    point_count    = {}", shape.point_count);
-            println!(
-                "    clustering_coef= {:.4}  (expected ≈ 1.0)",
-                shape.clustering_coef
-            );
-            println!(
-                "    effective_dim  = {:.4}  (expected ≈ 2.0)",
-                shape.effective_dim
-            );
-            println!(
-                "    skewness       = [{:.4}, {:.4}]",
-                shape.skewness[0], shape.skewness[1]
-            );
-            println!(
-                "    query_mix      = range={:.2} knn={:.2} join={:.2} sel={:.4}",
-                shape.query_mix.range_frac,
-                shape.query_mix.knn_frac,
-                shape.query_mix.join_frac,
-                shape.query_mix.mean_selectivity,
-            );
-        }
+    // Feed every point from the original dataset in Hilbert order, mirroring
+    // how the backends were loaded in §3.
+    for (_, p) in &sorted {
+        profiler.observe(Observation::Insert(*p));
     }
+    // Record the range query from §4 so the profiler tracks query workload too.
+    profiler.observe(Observation::Query {
+        kind: QueryKind::Range,
+        selectivity: brute as f64 / N as f64,
+        hit: brute > 0,
+    });
+    profiler.flush();
 
-    // ── 7b. Clustered data ────────────────────────────────────────────────────
-    {
-        let mut profiler = Profiler::<f64, 2>::new(4096);
-        let mut rng = Lcg::new(0xcafebabe);
+    let data_shape = profiler
+        .data_shape()
+        .expect("profiler must have a shape after N inserts")
+        .clone();
 
-        let centres: Vec<[f64; 2]> = (0..PROF_CLUSTERS)
-            .map(|_| {
-                [
-                    rng.next_f64() * 800.0 + 100.0,
-                    rng.next_f64() * 800.0 + 100.0,
-                ]
-            })
-            .collect();
-
-        for i in 0..PROF_N {
-            let c = &centres[i % PROF_CLUSTERS];
-            let x = (c[0] + rng.next_normal() * PROF_SIGMA).clamp(0.0, PROF_DOMAIN);
-            let y = (c[1] + rng.next_normal() * PROF_SIGMA).clamp(0.0, PROF_DOMAIN);
-            profiler.observe(Observation::Insert(Point::new([x, y])));
-        }
-        profiler.flush();
-
-        if let Some(shape) = profiler.data_shape() {
-            println!(
-                "  Clustered data ({PROF_N} points, {PROF_CLUSTERS} clusters, σ={PROF_SIGMA}):"
-            );
-            println!("    point_count    = {}", shape.point_count);
-            println!(
-                "    clustering_coef= {:.4}  (expected > 1.0)",
-                shape.clustering_coef
-            );
-            println!(
-                "    effective_dim  = {:.4}  (expected ≈ 2.0)",
-                shape.effective_dim
-            );
-            println!(
-                "    skewness       = [{:.4}, {:.4}]",
-                shape.skewness[0], shape.skewness[1]
-            );
-        }
-    }
-
-    // ── 7c. Linear data (1D manifold in 2D space) ─────────────────────────────
-    {
-        // Use a smaller reservoir for the linear demo to keep it fast.
-        let mut profiler = Profiler::<f64, 2>::new(1024);
-        let mut rng = Lcg::new(0x12345678);
-
-        for i in 0..PROF_N {
-            let t = (i as f64 / PROF_N as f64) * PROF_DOMAIN;
-            let noise = rng.next_f64() * 0.1;
-            profiler.observe(Observation::Insert(Point::new([
-                t + noise,
-                t * 0.5 + noise,
-            ])));
-        }
-        profiler.flush();
-
-        if let Some(shape) = profiler.data_shape() {
-            println!("  Linear data ({PROF_N} points on a line in 2D, reservoir=1024):");
-            println!("    point_count    = {}", shape.point_count);
-            println!("    clustering_coef= {:.4}", shape.clustering_coef);
-            println!(
-                "    effective_dim  = {:.4}  (expected ≈ 1.0)",
-                shape.effective_dim
-            );
-        }
-    }
-
-    // ── 8. CostModel — feed the live Profiler shapes from §7 into the model ────
-    println!("\n=== 8. CostModel demo (shapes from live Profiler output, D=2) ===");
-    println!("  (selectivity injected as 0.01 to match the range queries recorded in §7)");
-
-    fn print_cost_table(label: &str, shape: &DataShape<2>) {
-        let estimates = CostModel::<2>::estimate_all(shape, QueryKind::Range);
-        let cheapest = CostModel::<2>::cheapest(shape, QueryKind::Range);
-        println!("  {label}:");
-        for e in &estimates {
-            let marker = if e.backend == cheapest {
-                " ← cheapest"
-            } else {
-                ""
-            };
-            let name = match e.backend {
-                BackendKind::RTree => "R-tree   ",
-                BackendKind::KDTree => "KD-tree  ",
-                BackendKind::Grid => "Grid     ",
-                BackendKind::Quadtree => "Quadtree ",
-            };
-            println!("    {name}  cost = {:>10.4}{marker}", e.cost);
-        }
-    }
-
-    // Re-run the two profilers from §7 and capture their DataShapes.
-    let uniform_shape: DataShape<2> = {
-        let mut profiler = Profiler::<f64, 2>::new(4096);
-        let mut rng = Lcg::new(0xdeadbeef);
-        for _ in 0..50_000usize {
-            let x = rng.next_f64() * DOMAIN;
-            let y = rng.next_f64() * DOMAIN;
-            profiler.observe(Observation::Insert(Point::new([x, y])));
-        }
-        for _ in 0..200 {
-            profiler.observe(Observation::Query {
-                kind: QueryKind::Range,
-                selectivity: 0.01,
-                hit: true,
-            });
-        }
-        profiler.flush();
-        profiler.data_shape().unwrap().clone()
-    };
-
-    let clustered_shape: DataShape<2> = {
-        let mut profiler = Profiler::<f64, 2>::new(4096);
-        let mut rng = Lcg::new(0xcafebabe);
-        let centres: Vec<[f64; 2]> = (0..10)
-            .map(|_| {
-                [
-                    rng.next_f64() * 800.0 + 100.0,
-                    rng.next_f64() * 800.0 + 100.0,
-                ]
-            })
-            .collect();
-        for i in 0..50_000usize {
-            let c = &centres[i % 10];
-            let x = (c[0] + rng.next_normal() * 5.0).clamp(0.0, DOMAIN);
-            let y = (c[1] + rng.next_normal() * 5.0).clamp(0.0, DOMAIN);
-            profiler.observe(Observation::Insert(Point::new([x, y])));
-        }
-        for _ in 0..200 {
-            profiler.observe(Observation::Query {
-                kind: QueryKind::Range,
-                selectivity: 0.01,
-                hit: true,
-            });
-        }
-        profiler.flush();
-        profiler.data_shape().unwrap().clone()
-    };
-
-    print_cost_table(
-        &format!(
-            "Uniform   (n={}, clustering_coef={:.4}, selectivity={:.4})",
-            uniform_shape.point_count,
-            uniform_shape.clustering_coef,
-            uniform_shape.query_mix.mean_selectivity,
-        ),
-        &uniform_shape,
+    println!("  point_count    = {}", data_shape.point_count);
+    println!(
+        "  clustering_coef= {:.4}  (clustered data → expected > 1.0)",
+        data_shape.clustering_coef
     );
-    print_cost_table(
-        &format!(
-            "Clustered (n={}, clustering_coef={:.4}, selectivity={:.4})",
-            clustered_shape.point_count,
-            clustered_shape.clustering_coef,
-            clustered_shape.query_mix.mean_selectivity,
-        ),
-        &clustered_shape,
+    println!(
+        "  effective_dim  = {:.4}  (2D data → expected ≈ 2.0)",
+        data_shape.effective_dim
     );
-    println!("  (Ranking shifts because KD-tree and Grid costs scale with clustering_coef)");
+    println!(
+        "  skewness       = [{:.4}, {:.4}]",
+        data_shape.skewness[0], data_shape.skewness[1]
+    );
+    println!(
+        "  query_mix      = range={:.2} knn={:.2} join={:.2} sel={:.4}",
+        data_shape.query_mix.range_frac,
+        data_shape.query_mix.knn_frac,
+        data_shape.query_mix.join_frac,
+        data_shape.query_mix.mean_selectivity,
+    );
+
+    // ── 8. CostModel — rank backends using the §7 DataShape ──────────────────
+    println!("\n=== 8. CostModel (§7 DataShape, D=2) ===");
+
+    let estimates = CostModel::<2>::estimate_all(&data_shape, QueryKind::Range);
+    let cheapest = CostModel::<2>::cheapest(&data_shape, QueryKind::Range);
+    for e in &estimates {
+        let marker = if e.backend == cheapest {
+            " ← cheapest"
+        } else {
+            ""
+        };
+        let name = match e.backend {
+            BackendKind::RTree => "R-tree   ",
+            BackendKind::KDTree => "KD-tree  ",
+            BackendKind::Grid => "Grid     ",
+            BackendKind::Quadtree => "Quadtree ",
+        };
+        println!("  {name}  cost = {:>10.4}{marker}", e.cost);
+    }
+    println!(
+        "  clustering_coef={:.4} → KD-tree and Grid costs scale up; {:?} wins",
+        data_shape.clustering_coef, cheapest
+    );
+
+    // ── 9. PolicyEngine — tick on the §7 DataShape, show migration decision ───
+    println!("\n=== 9. PolicyEngine (ticking on §7 DataShape, hysteresis=5) ===");
+
+    // Start on whichever backend the cost model did NOT pick as cheapest, so
+    // the policy engine has a reason to migrate.
+    let starting_backend = if cheapest == BackendKind::KDTree {
+        BackendKind::RTree
+    } else {
+        BackendKind::KDTree
+    };
+    let mut engine = PolicyEngine::<2>::with_config(starting_backend, 0.77, 5);
+    println!(
+        "  Starting on {:?} (cost model prefers {:?}) — migration expected after window",
+        starting_backend, cheapest,
+    );
+
+    for tick in 1..=8 {
+        let obs = engine.observations_since_migration();
+        match engine.tick(&data_shape) {
+            Some(d) => {
+                println!(
+                    "  tick {tick} | obs={} | *** MIGRATE → {:?} (cost_ratio={:.3}) ***",
+                    obs + 1,
+                    d.target,
+                    d.cost_ratio,
+                );
+                engine.on_migration_started();
+                engine.on_migration_complete(d.target);
+                println!("  [migration complete — hysteresis counter reset]");
+            }
+            None => println!(
+                "  tick {tick} | obs={} | no migration{}",
+                obs + 1,
+                if obs < engine.hysteresis_window() {
+                    " (hysteresis guard)"
+                } else {
+                    ""
+                },
+            ),
+        }
+    }
+    println!("  Final backend: {:?}", engine.current_backend());
 }

@@ -5,6 +5,7 @@
 //! lock-free MPSC channel and processed in batches of 64.
 
 pub mod cost_model;
+pub mod policy;
 pub mod reservoir;
 pub mod stats;
 
@@ -15,6 +16,7 @@ use reservoir::ReservoirSampler;
 use stats::OnlineStats;
 
 pub use cost_model::{CostEstimate, CostModel};
+pub use policy::{MigrationDecision, PolicyEngine};
 
 /// The type of query observation sent to the profiler.
 #[derive(Debug, Clone, Copy)]

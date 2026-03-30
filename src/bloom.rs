@@ -277,8 +277,6 @@ mod tests {
         }
     }
 
-    // ── property tests ───────────────────────────────────────────────────────
-
     use proptest::prelude::*;
     fn bbox_strategy_2d() -> impl Strategy<Value = BBox<f64, 2>> {
         (

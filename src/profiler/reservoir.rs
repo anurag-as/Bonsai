@@ -100,7 +100,7 @@ mod tests {
 
     // For any sequence of n insertions into a ReservoirSampler with capacity k,
     // the reservoir size must never exceed k, and each point must have equal
-    // probability k/n of being represented (Property 9).
+    // probability k/n of being represented.
     proptest! {
         #![proptest_config(proptest::test_runner::Config {
             cases: 200,
