@@ -282,7 +282,7 @@ fn cmd_stream(interval: usize) {
         max_y = max_y.max(y);
         count += 1;
 
-        if count % interval == 0 {
+        if count.is_multiple_of(interval) {
             let s = index.stats();
             println!(
                 "points={:>8}  backend={:<10}  migrations={}",
