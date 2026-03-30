@@ -88,9 +88,10 @@ impl<C: CoordType, const D: usize> QuadNode<C, D> {
     }
 
     fn insert(&mut self, point: Point<C, D>, id: EntryId) {
-        if let Some(ref mut children) = self.children {
+        #[allow(clippy::unnecessary_unwrap)]
+        if self.children.is_some() {
             let ci = self.child_index(&point);
-            children[ci].insert(point, id);
+            self.children.as_mut().unwrap()[ci].insert(point, id);
             return;
         }
         self.entries.push((point, id));
