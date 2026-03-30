@@ -184,8 +184,7 @@ mod tests {
         }
     }
 
-    // Feature: bonsai-spatial-index, Property 12: For any migration event, the
-    // PolicyEngine must not trigger another migration for the next
+    // For any migration event, the PolicyEngine must not trigger another migration for the next
     // `hysteresis_window` observations, regardless of cost model estimates
     // during that window.
     proptest! {
@@ -221,8 +220,7 @@ mod tests {
         }
     }
 
-    // Feature: bonsai-spatial-index, Property 13: For any data shape where no
-    // alternative backend's estimated cost is less than
+    // For any data shape where no alternative backend's estimated cost is less than
     // `current_cost × improvement_threshold`, the PolicyEngine must not trigger
     // a migration.
     proptest! {
@@ -247,8 +245,7 @@ mod tests {
         }
     }
 
-    // Feature: bonsai-spatial-index, Property 15: For any scenario where a
-    // migration is already in progress, a second call to trigger migration must
+    // For any scenario where a migration is already in progress, a second call to trigger migration must
     // be rejected (PolicyEngine returns None and migrating flag remains true).
     proptest! {
         #![proptest_config(proptest::test_runner::Config {

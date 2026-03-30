@@ -14,15 +14,21 @@
 //!  10. Migration     — execute the §9 decision: migrate the §1 KD-tree to the
 //!                      policy-chosen backend; verify range query results are
 //!                      identical before and after
+//!  11. IndexRouter + StatsCollector — 4 insert threads × 1 000 points each,
+//!                      2 query threads; print totals from StatsCollector
 //!
 //! Run with:
 //!   cargo run --example demo_bonsai
+
+use std::sync::Arc;
 
 use bonsai::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use bonsai::bloom::{BloomCache, BloomResult};
 use bonsai::hilbert::HilbertCurve;
 use bonsai::migration::SimpleIndex;
 use bonsai::profiler::{CostModel, Observation, PolicyEngine, Profiler, QueryKind};
+use bonsai::router::IndexRouter;
+use bonsai::stats::StatsCollector;
 use bonsai::types::{BBox, BackendKind, EntryId, Point};
 struct Lcg(u64);
 impl Lcg {
@@ -423,9 +429,7 @@ fn main() {
 
     // Build the index on the backend the policy engine started on.
     let mut mig_index: SimpleIndex<usize, f64, 2> = match starting_backend {
-        BackendKind::RTree => {
-            SimpleIndex::new(Box::new(RTree::<(EntryId, usize), f64, 2>::new()))
-        }
+        BackendKind::RTree => SimpleIndex::new(Box::new(RTree::<(EntryId, usize), f64, 2>::new())),
         _ => SimpleIndex::new(Box::new(KDTree::<(EntryId, usize), f64, 2>::new())),
     };
 
@@ -437,7 +441,10 @@ fn main() {
     // Range query before migration — reuse the §4 bbox.
     let mut before_ids = mig_index.range_query(&query_bbox);
     before_ids.sort_by_key(|id| id.0);
-    println!("  Before migration : {} results (bbox = §4 query)", before_ids.len());
+    println!(
+        "  Before migration : {} results (bbox = §4 query)",
+        before_ids.len()
+    );
 
     // Execute the migration to the policy-chosen backend.
     let mig_result = match cheapest {
@@ -464,6 +471,60 @@ fn main() {
         if before_ids == after_ids { "yes" } else { "NO" },
     );
     println!("  New backend      : {:?}", mig_result.new_backend);
-    println!("  Entry count after: {} (expected {N})", mig_result.entry_count);
+    println!(
+        "  Entry count after: {} (expected {N})",
+        mig_result.entry_count
+    );
     println!("  Migration duration: {:?}", mig_result.duration);
+
+    // ── 11. IndexRouter + StatsCollector — concurrent inserts and queries ─────
+    println!("\n=== 11. IndexRouter + StatsCollector (4 insert threads × 1 000 pts, 2 query threads) ===");
+
+    let router: Arc<IndexRouter<usize, f64, 2>> =
+        Arc::new(IndexRouter::new(Box::new(KDTree::<usize, f64, 2>::new())));
+    let sc: Arc<StatsCollector> = Arc::new(StatsCollector::new());
+
+    let mut handles = Vec::new();
+
+    // 4 insert threads, each inserting 1 000 points.
+    for t in 0..4u64 {
+        let r = Arc::clone(&router);
+        let s = Arc::clone(&sc);
+        handles.push(std::thread::spawn(move || {
+            let mut lcg = Lcg::new(t.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1));
+            for _ in 0..1_000 {
+                let x = lcg.next_f64() * 1_000.0;
+                let y = lcg.next_f64() * 1_000.0;
+                r.insert(Point::new([x, y]), t as usize);
+                s.record_insert();
+            }
+        }));
+    }
+
+    // 2 query threads, each running 200 range queries.
+    for _ in 0..2u64 {
+        let r = Arc::clone(&router);
+        let s = Arc::clone(&sc);
+        handles.push(std::thread::spawn(move || {
+            let bbox = BBox::new(Point::new([200.0, 200.0]), Point::new([800.0, 800.0]));
+            for _ in 0..200 {
+                let t0 = std::time::Instant::now();
+                let _ = r.range_query(&bbox);
+                s.record_query(t0.elapsed().as_nanos() as u64);
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+
+    println!("  Total points inserted : {}", router.len());
+    println!("  StatsCollector inserts: {}", sc.insert_count());
+    println!("  StatsCollector queries: {}", sc.query_count());
+    println!("  Mean query latency    : {} ns", sc.mean_query_ns());
+    println!(
+        "  No panics or data races: yes (all {} threads joined cleanly)",
+        6
+    );
 }
