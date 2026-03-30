@@ -3,7 +3,7 @@ name = "bonsai"
 version = "0.1.0"
 edition = "2021"
 description = "A zero-dependency, embeddable, self-tuning spatial index for Rust"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
