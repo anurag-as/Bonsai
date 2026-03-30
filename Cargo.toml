@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "A zero-dependency, embeddable, self-tuning spatial index for Rust"
 license = "Apache-2.0"
+repository = "https://github.com/anurag-as/bonsai"
+homepage = "https://github.com/anurag-as/bonsai"
+documentation = "https://docs.rs/bonsai"
+readme = "README.md"
+keywords = ["spatial", "index", "rtree", "kdtree", "geospatial"]
+categories = ["data-structures", "algorithms", "science::geo"]
+exclude = [".kiro", ".github", "benches", "examples", "proptest-regressions"]
 
 [lib]
 crate-type = ["rlib", "cdylib"]
