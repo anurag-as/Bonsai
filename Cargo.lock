@@ -68,6 +68,7 @@ dependencies = [
  "criterion",
  "loom",
  "proptest",
+ "rayon",
  "serde",
  "wasm-bindgen",
 ]
