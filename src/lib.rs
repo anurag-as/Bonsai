@@ -14,6 +14,9 @@ pub mod ser;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 pub use index::{BonsaiConfig, BonsaiIndex};
 pub use profiler::{
