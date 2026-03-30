@@ -11,6 +11,9 @@ pub mod types;
 #[cfg(feature = "serde")]
 pub mod ser;
 
+#[cfg(feature = "ffi")]
+pub mod ffi;
+
 pub use backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 pub use index::{BonsaiConfig, BonsaiIndex};
 pub use profiler::{

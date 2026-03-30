@@ -17,6 +17,8 @@ serde        = { version = "1", features = ["derive"], optional = true }
 bincode      = { version = "1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
+[build-dependencies]
+
 [dev-dependencies]
 proptest = { version = "1.4.0", default-features = false, features = ["std", "bit-set"] }
 loom      = "0.7"

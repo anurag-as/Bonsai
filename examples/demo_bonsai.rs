@@ -634,4 +634,119 @@ fn main() {
             println!("  First 5 payloads: {:?}", &orig_payloads[..5]);
         }
     }
+
+    // ── 14. C FFI round-trip — exercise the extern "C" API from Rust ─────────
+    // Uses three points from the §1 Hilbert-sorted dataset so the inserted
+    // coordinates are grounded in the same data that flows through every
+    // earlier section.  The §4 query bbox [300,700]^2 is reused so the result
+    // count is directly comparable to the backend results above.
+    #[cfg(feature = "ffi")]
+    {
+        use bonsai::ffi::{
+            bonsai_free, bonsai_insert_2d, bonsai_knn_query_2d, bonsai_new, bonsai_range_query_2d,
+            bonsai_stats, BonsaiStats,
+        };
+
+        println!("\n=== 14. C FFI round-trip (feature = \"ffi\", 3 §1 points, §4 bbox) ===");
+
+        // Pick three representative §1 points: one inside the §4 bbox, one on
+        // the boundary, one outside.
+        let ffi_pts: Vec<[f64; 2]> = sorted
+            .iter()
+            .map(|(_, p)| [p.coords()[0], p.coords()[1]])
+            .take(3)
+            .collect();
+
+        unsafe {
+            // SAFETY: `bonsai_new` returns a valid, heap-allocated handle.
+            let h = bonsai_new();
+            assert!(!h.is_null(), "bonsai_new returned null");
+
+            // Insert the three §1 points with null payloads.
+            // SAFETY: `h` is valid; null payload is stored as-is.
+            let ids: Vec<u64> = ffi_pts
+                .iter()
+                .map(|p| bonsai_insert_2d(h, p[0], p[1], std::ptr::null_mut()))
+                .collect();
+            println!(
+                "  Inserted §1 points: ({:.2},{:.2}) ({:.2},{:.2}) ({:.2},{:.2})",
+                ffi_pts[0][0],
+                ffi_pts[0][1],
+                ffi_pts[1][0],
+                ffi_pts[1][1],
+                ffi_pts[2][0],
+                ffi_pts[2][1],
+            );
+            println!("  Assigned IDs: {:?}", ids);
+
+            // Range query with the §4 bbox — count should match the fraction
+            // of the three points that fall inside [300,700]^2.
+            let mut out_ids = [0u64; 8];
+            // SAFETY: `h` is valid; `out_ids` has capacity 8.
+            let count = bonsai_range_query_2d(
+                h,
+                300.0,
+                300.0,
+                700.0,
+                700.0,
+                out_ids.as_mut_ptr(),
+                out_ids.len(),
+            );
+            let expected = ffi_pts
+                .iter()
+                .filter(|p| p[0] >= 300.0 && p[0] <= 700.0 && p[1] >= 300.0 && p[1] <= 700.0)
+                .count();
+            println!(
+                "  Range §4 bbox: {count} result(s) (expected {expected}) — IDs: {:?}",
+                &out_ids[..count],
+            );
+            assert_eq!(count, expected, "FFI range query count mismatch");
+
+            // kNN(k=1) from the §5 query point (500, 500).
+            let mut knn_ids = [0u64; 1];
+            let mut knn_dist = [0.0f64; 1];
+            // SAFETY: `h` is valid; buffers have capacity 1.
+            let knn_count = bonsai_knn_query_2d(
+                h,
+                500.0,
+                500.0,
+                1,
+                knn_ids.as_mut_ptr(),
+                knn_dist.as_mut_ptr(),
+            );
+            println!(
+                "  kNN(k=1) from §5 query point (500,500): count={knn_count}  id={}  dist={:.4}",
+                knn_ids[0], knn_dist[0],
+            );
+            assert_eq!(knn_count, 1);
+
+            // Stats snapshot.
+            let mut stats = BonsaiStats {
+                point_count: 0,
+                query_count: 0,
+                migration_count: 0,
+                migrating: 0,
+                backend_kind: 0,
+            };
+            // SAFETY: `h` and `&mut stats` are valid.
+            let ok = bonsai_stats(h, &mut stats as *mut BonsaiStats);
+            assert_eq!(ok, 1);
+            println!(
+                "  Stats: point_count={}  queries={}  backend_kind={}",
+                stats.point_count, stats.query_count, stats.backend_kind,
+            );
+            assert_eq!(stats.point_count, 3);
+
+            // Free — must not leak or crash.
+            // SAFETY: `h` is valid and has not been freed yet.
+            bonsai_free(h);
+
+            // Free null — documented no-op.
+            // SAFETY: null pointer is explicitly handled.
+            bonsai_free(std::ptr::null_mut());
+
+            println!("  bonsai_free(null) — no-op: ok");
+            println!("  FFI round-trip: all assertions passed");
+        }
+    }
 }
