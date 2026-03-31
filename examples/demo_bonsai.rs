@@ -1,7 +1,5 @@
 //! Bonsai end-to-end demo.
 //!
-//! One dataset, one story — each section builds directly on the previous:
-//!
 //!   1. HilbertCurve  — sort 2 000 clustered points into cache-friendly order
 //!   2. BloomCache    — populate from the §1 Hilbert-sorted insertions
 //!   3. All 4 backends — loaded in §1 Hilbert order; KD-tree carried forward
