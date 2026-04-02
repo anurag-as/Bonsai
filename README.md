@@ -12,7 +12,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bonsai-index = "0.1"
+bonsai-index = "1.0"
 ```
 
 ### Feature Flags
@@ -26,10 +26,10 @@ bonsai-index = "0.1"
 
 ```toml
 # Enable serialisation only
-bonsai-index = { version = "0.1", features = ["serde"] }
+bonsai-index = { version = "1.0", features = ["serde"] }
 
 # Enable everything
-bonsai-index = { version = "0.1", features = ["full"] }
+bonsai-index = { version = "1.0", features = ["full"] }
 ```
 
 ---
@@ -128,6 +128,10 @@ let _ = index.force_backend(BackendKind::RTree);
 
 // Re-enable automatic adaptation
 index.unfreeze();
+
+// Reset the index to an empty state, preserving config, frozen flag, and migration count.
+// Returns Err(BonsaiError::MigrationInProgress) if a migration is currently running.
+index.clear().unwrap();
 ```
 
 ### Serialisation (feature = "serde")
