@@ -6,6 +6,9 @@ Generic over dimensionality (`const D: usize`, D=1–8, default D=2) and coordin
 
 ---
 
+## Crate
+The package is available on [crate bonsai-index](https://crates.io/crates/bonsai-index)
+
 ## Installation
 
 Add to your `Cargo.toml`:
