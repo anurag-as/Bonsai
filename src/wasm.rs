@@ -109,6 +109,17 @@ impl WasmBonsaiIndex {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Reset the index to an empty state, preserving configuration.
+    ///
+    /// Delegates to `BonsaiIndex::clear()`. Panics if a migration is in
+    /// progress (migrations are not exposed to the WASM API).
+    #[wasm_bindgen]
+    pub fn clear(&mut self) {
+        self.inner
+            .clear()
+            .expect("clear() failed: migration in progress");
+    }
 }
 
 impl Default for WasmBonsaiIndex {
@@ -190,5 +201,37 @@ mod tests {
         let results = idx.range_query(0.0, 0.0, 10.0, 11.0);
         // five results: ten f64 values
         assert_eq!(results.len(), 10);
+    }
+
+    #[test]
+    fn wasm_clear_resets_len() {
+        let mut idx = WasmBonsaiIndex::new();
+        idx.insert(1.0, 2.0, 10);
+        idx.insert(3.0, 4.0, 20);
+        idx.insert(5.0, 6.0, 30);
+        assert_eq!(idx.len(), 3);
+        idx.clear();
+        assert_eq!(idx.len(), 0);
+        assert!(idx.is_empty());
+    }
+
+    #[test]
+    fn wasm_clear_then_insert_query() {
+        let mut idx = WasmBonsaiIndex::new();
+        // Insert some initial data, then clear it.
+        idx.insert(100.0, 100.0, 99);
+        idx.clear();
+
+        // Insert fresh data after clear.
+        idx.insert(1.0, 1.0, 1);
+        idx.insert(2.0, 2.0, 2);
+
+        // range_query should return only the post-clear inserts.
+        let range_results = idx.range_query(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(range_results.len(), 4); // 2 entries × 2 f64 values each
+
+        // knn_query should also return only the post-clear inserts.
+        let knn_results = idx.knn_query(1.0, 1.0, 2);
+        assert_eq!(knn_results.len(), 6); // 2 entries × 3 f64 values each
     }
 }

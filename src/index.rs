@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::backends::{KDTree, SpatialBackend};
+use crate::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use crate::bloom::BloomCache;
 use crate::profiler::{Observation, Profiler};
 use crate::router::IndexRouter;
@@ -484,6 +484,55 @@ where
         Ok(())
     }
 
+    /// Reset the index to an empty state, preserving configuration.
+    ///
+    /// Replaces the active backend with a new, empty instance of the same
+    /// backend kind, resets the bloom cache, profiler, stats collector, and
+    /// point count to their initial states.
+    ///
+    /// Preserves: `config`, `frozen`, `migration_count`.
+    ///
+    /// Returns `Err(BonsaiError::MigrationInProgress)` if a migration is
+    /// currently in progress; the index state is left unmodified in that case.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use bonsai::index::BonsaiIndex;
+    /// use bonsai::types::Point;
+    ///
+    /// let mut idx: BonsaiIndex<u32> = BonsaiIndex::builder().build();
+    /// idx.insert(Point::new([1.0, 2.0]), 1);
+    /// idx.clear().unwrap();
+    /// assert_eq!(idx.len(), 0);
+    /// ```
+    pub fn clear(&mut self) -> Result<(), BonsaiError> {
+        if self.router.is_migrating() {
+            return Err(BonsaiError::MigrationInProgress);
+        }
+        // Read the active backend kind before replacing the router.
+        let kind = {
+            // SAFETY: same invariant as in `knn_query` — `active_ptr()` returns
+            // a valid non-null pointer that lives as long as the `IndexRouter`,
+            // which we hold via `Arc`. `&mut self` guarantees no concurrent
+            // borrows exist.
+            let active = unsafe { &*self.router.active_ptr() };
+            active.read().kind()
+        };
+        let fresh_backend: Box<dyn SpatialBackend<T, C, D>> = match kind {
+            BackendKind::KDTree => Box::new(KDTree::new()),
+            BackendKind::RTree => Box::new(RTree::new()),
+            BackendKind::Quadtree => Box::new(Quadtree::new()),
+            BackendKind::Grid => Box::new(GridIndex::<T, C, D>::default()),
+        };
+        self.router = Arc::new(IndexRouter::new(fresh_backend));
+        self.bloom = BloomCache::new(self.config.bloom_memory_bytes, 7);
+        self.profiler = Profiler::new(self.config.reservoir_size);
+        self.stats = Arc::new(StatsCollector::new());
+        self.point_count = 0;
+        Ok(())
+    }
+
     /// Freeze automatic adaptation.
     ///
     /// While frozen, the policy engine will not trigger migrations. Use
@@ -684,5 +733,257 @@ mod tests {
         b.insert(Point::new([1.0, 1.0]), ());
         let pairs = a.spatial_join(&b);
         assert_eq!(pairs.len(), 1);
+    }
+
+    #[test]
+    fn clear_on_empty_index_succeeds() {
+        let mut idx = make_index();
+        assert!(idx.clear().is_ok());
+        assert_eq!(idx.len(), 0);
+    }
+
+    #[test]
+    fn clear_resets_len() {
+        let mut idx = make_index();
+        for i in 0..5 {
+            idx.insert(Point::new([i as f64, i as f64]), "x");
+        }
+        assert_eq!(idx.len(), 5);
+        idx.clear().unwrap();
+        assert_eq!(idx.len(), 0);
+    }
+
+    #[test]
+    fn clear_preserves_frozen() {
+        let mut idx = make_index();
+        idx.freeze();
+        idx.clear().unwrap();
+        assert!(idx.is_frozen());
+    }
+
+    #[test]
+    fn clear_preserves_migration_count() {
+        let mut idx = make_index();
+        let migrations_before = idx.stats().migrations;
+        idx.insert(Point::new([1.0, 1.0]), "a");
+        idx.clear().unwrap();
+        assert_eq!(idx.stats().migrations, migrations_before);
+    }
+
+    #[test]
+    fn clear_returns_err_when_migrating() {
+        let mut idx: BonsaiIndex<&str> = BonsaiIndex::builder().build();
+        // Begin a migration so `is_migrating()` returns true.
+        use crate::backends::KDTree as KD;
+        idx.router
+            .begin_migration(Box::new(KD::<&str, f64, 2>::new()));
+        let result = idx.clear();
+        assert!(matches!(result, Err(BonsaiError::MigrationInProgress)));
+        // Clean up so the router drops cleanly.
+        idx.router.commit_migration();
+    }
+
+    #[test]
+    fn clear_empty_range_query_returns_empty() {
+        let mut idx = make_index();
+        idx.insert(Point::new([1.0, 1.0]), "a");
+        idx.clear().unwrap();
+        let full = BBox::new(Point::new([-1e9, -1e9]), Point::new([1e9, 1e9]));
+        assert!(idx.range_query(&full).is_empty());
+    }
+
+    #[test]
+    fn clear_then_insert_range_query() {
+        let mut idx = make_index();
+        idx.insert(Point::new([50.0, 50.0]), "old");
+        idx.clear().unwrap();
+        idx.insert(Point::new([1.0, 1.0]), "new");
+        let bbox = BBox::new(Point::new([0.0, 0.0]), Point::new([5.0, 5.0]));
+        let results = idx.range_query(&bbox);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, "new");
+    }
+
+    #[test]
+    fn clear_then_insert_knn_query() {
+        let mut idx = make_index();
+        idx.insert(Point::new([50.0, 50.0]), "old");
+        idx.clear().unwrap();
+        idx.insert(Point::new([1.0, 1.0]), "new");
+        let results = idx.knn_query(&Point::new([0.0, 0.0]), 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].2, "new");
+    }
+
+    mod prop_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Strategy that generates a 2-D point with coordinates in [-1000, 1000].
+        fn point_strategy() -> impl Strategy<Value = Point<f64, 2>> {
+            (-1000.0_f64..1000.0_f64, -1000.0_f64..1000.0_f64).prop_map(|(x, y)| Point::new([x, y]))
+        }
+
+        /// Strategy that generates a (min, max) bbox where min ≤ max on each axis.
+        fn bbox_strategy() -> impl Strategy<Value = BBox<f64, 2>> {
+            (
+                -1000.0_f64..1000.0_f64,
+                -1000.0_f64..1000.0_f64,
+                0.001_f64..500.0_f64,
+                0.001_f64..500.0_f64,
+            )
+                .prop_map(|(x, y, w, h)| BBox::new(Point::new([x, y]), Point::new([x + w, y + h])))
+        }
+
+        // Backend kind preserved after clear
+        proptest! {
+            #![proptest_config(proptest::test_runner::Config {
+                cases: 100,
+                ..Default::default()
+            })]
+
+            #[test]
+            fn prop_clear_preserves_backend_kind(
+                points in prop::collection::vec(point_strategy(), 0..30),
+                backend_idx in 0usize..4,
+            ) {
+                let kinds = [
+                    BackendKind::KDTree,
+                    BackendKind::RTree,
+                    BackendKind::Quadtree,
+                    BackendKind::Grid,
+                ];
+                let kind = kinds[backend_idx % 4];
+                let mut idx: BonsaiIndex<u32> = BonsaiIndex::builder()
+                    .initial_backend(kind)
+                    .build();
+                // Force the backend so the active kind matches our choice.
+                idx.force_backend(kind).unwrap();
+                for (i, p) in points.iter().enumerate() {
+                    idx.insert(*p, i as u32);
+                }
+                let kind_before = idx.stats().backend;
+                idx.clear().unwrap();
+                prop_assert_eq!(
+                    idx.stats().backend,
+                    kind_before,
+                    "backend kind must be preserved after clear"
+                );
+            }
+        }
+
+        // len() invariant after clear
+        proptest! {
+            #![proptest_config(proptest::test_runner::Config {
+                cases: 100,
+                ..Default::default()
+            })]
+
+            #[test]
+            fn prop_clear_len_invariant(
+                pre_inserts in prop::collection::vec(point_strategy(), 0..30),
+                post_inserts in prop::collection::vec(point_strategy(), 0..30),
+            ) {
+                let mut idx: BonsaiIndex<u32> = BonsaiIndex::builder().build();
+                for (i, p) in pre_inserts.iter().enumerate() {
+                    idx.insert(*p, i as u32);
+                }
+                idx.clear().unwrap();
+                for (i, p) in post_inserts.iter().enumerate() {
+                    idx.insert(*p, i as u32);
+                }
+                prop_assert_eq!(
+                    idx.len(),
+                    post_inserts.len(),
+                    "len() must equal the number of inserts after clear"
+                );
+            }
+        }
+
+        //Empty query results after clear
+        proptest! {
+            #![proptest_config(proptest::test_runner::Config {
+                cases: 100,
+                ..Default::default()
+            })]
+
+            #[test]
+            fn prop_clear_empty_queries(
+                points in prop::collection::vec(point_strategy(), 1..30),
+                query_bbox in bbox_strategy(),
+                knn_point in point_strategy(),
+                k in 1usize..10,
+            ) {
+                let mut idx: BonsaiIndex<u32> = BonsaiIndex::builder().build();
+                for (i, p) in points.iter().enumerate() {
+                    idx.insert(*p, i as u32);
+                }
+                idx.clear().unwrap();
+                prop_assert!(
+                    idx.range_query(&query_bbox).is_empty(),
+                    "range_query must return empty after clear"
+                );
+                prop_assert!(
+                    idx.knn_query(&knn_point, k).is_empty(),
+                    "knn_query must return empty after clear"
+                );
+            }
+        }
+
+        // Round-trip equivalence
+        proptest! {
+            #![proptest_config(proptest::test_runner::Config {
+                cases: 100,
+                ..Default::default()
+            })]
+
+            #[test]
+            fn prop_clear_round_trip_equivalence(
+                pre_inserts in prop::collection::vec(point_strategy(), 0..20),
+                entries in prop::collection::vec(
+                    (point_strategy(), 0u32..10_000u32),
+                    1..20,
+                ),
+            ) {
+                let full_bbox = BBox::new(
+                    Point::new([-1001.0, -1001.0]),
+                    Point::new([1001.0, 1001.0]),
+                );
+
+                // Fresh index: insert entries directly.
+                let mut fresh: BonsaiIndex<u32> = BonsaiIndex::builder().build();
+                for (p, v) in &entries {
+                    fresh.insert(*p, *v);
+                }
+                let mut fresh_results: Vec<u32> = fresh
+                    .range_query(&full_bbox)
+                    .into_iter()
+                    .map(|(_, v)| v)
+                    .collect();
+                fresh_results.sort_unstable();
+
+                // Cleared index: insert some data, clear, then insert the same entries.
+                let mut cleared: BonsaiIndex<u32> = BonsaiIndex::builder().build();
+                for (i, p) in pre_inserts.iter().enumerate() {
+                    cleared.insert(*p, i as u32 + 100_000);
+                }
+                cleared.clear().unwrap();
+                for (p, v) in &entries {
+                    cleared.insert(*p, *v);
+                }
+                let mut cleared_results: Vec<u32> = cleared
+                    .range_query(&full_bbox)
+                    .into_iter()
+                    .map(|(_, v)| v)
+                    .collect();
+                cleared_results.sort_unstable();
+
+                prop_assert_eq!(
+                    fresh_results,
+                    cleared_results,
+                    "clear+insert must produce the same range_query results as fresh+insert"
+                );
+            }
+        }
     }
 }
