@@ -5,7 +5,26 @@
 //! read path.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+
+// On wasm32-unknown-unknown, std::time::Instant panics at runtime.
+// Timing is a no-op on WASM — query counts still work, latency is always 0.
+#[cfg(target_arch = "wasm32")]
+struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    #[inline]
+    fn now() -> Self {
+        Instant
+    }
+    #[inline]
+    fn elapsed(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}
 
 /// Lock-free accumulator of query and insert statistics.
 ///

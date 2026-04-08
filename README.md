@@ -409,6 +409,8 @@ wasm-pack build --features wasm
 node examples/wasm_demo.js
 ```
 
+> **Note:** `wasm32-unknown-unknown` is fully supported. `std::time::Instant` is not available on this target, so timing-based stats (query latency, migration duration) are always reported as zero — all spatial operations work correctly.
+
 ---
 
 ## Demos
