@@ -1,5 +1,24 @@
 use std::ops::{Add, Div, Mul, Sub};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+
+// On wasm32-unknown-unknown, std::time::Instant panics at runtime.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+pub struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    #[inline]
+    pub fn now() -> Self {
+        Instant
+    }
+    #[inline]
+    pub fn elapsed(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}
 
 /// Trait bound for coordinate scalars. Implemented for `f32` and `f64`.
 pub trait CoordType:

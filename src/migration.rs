@@ -8,7 +8,26 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+
+// On wasm32-unknown-unknown, std::time::Instant panics at runtime.
+// Migration duration is always Duration::ZERO on WASM.
+#[cfg(target_arch = "wasm32")]
+struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    #[inline]
+    fn now() -> Self {
+        Instant
+    }
+    #[inline]
+    fn elapsed(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}
 
 use crate::backends::SpatialBackend;
 use crate::hilbert::HilbertCurve;

@@ -22,6 +22,26 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
+// On wasm32-unknown-unknown, std::time::Instant panics at runtime.
+// Timing is a no-op on WASM — latency stats are always 0.
+#[cfg(target_arch = "wasm32")]
+struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    #[inline]
+    fn now() -> Self {
+        Instant
+    }
+    #[inline]
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
+}
+
 use crate::backends::{GridIndex, KDTree, Quadtree, RTree, SpatialBackend};
 use crate::bloom::BloomCache;
 use crate::profiler::{Observation, Profiler};
@@ -314,7 +334,7 @@ where
     /// assert_eq!(results[0].1, "a");
     /// ```
     pub fn range_query(&mut self, bbox: &BBox<C, D>) -> Vec<(EntryId, T)> {
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let results = self.router.range_query(bbox);
         self.stats.record_query(t0.elapsed().as_nanos() as u64);
         results
@@ -338,7 +358,7 @@ where
     /// assert_eq!(results[0].2, "origin");
     /// ```
     pub fn knn_query(&self, point: &Point<C, D>, k: usize) -> Vec<(f64, EntryId, T)> {
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let results = {
             // SAFETY: `active_ptr()` returns a valid non-null pointer to a
             // `BackendBox` that lives as long as the `IndexRouter`. We hold a
